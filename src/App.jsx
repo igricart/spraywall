@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import Wall from './components/Wall.jsx';
 import RouteList from './components/RouteList.jsx';
-import { hasBackend, saveRoute } from './lib/api.js';
+import Ascent from './components/Ascent.jsx';
+import { hasBackend, myAscents, saveRoute } from './lib/api.js';
+import { gradeLabel, gradeOptions } from './lib/grades.js';
 import { FEET, decode, encode } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
 
@@ -15,6 +17,20 @@ function readLocal(wall) {
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
+  }
+}
+function readPref(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage blocked: preference lasts until reload
   }
 }
 
@@ -31,6 +47,27 @@ export default function App() {
   const [photo, setPhoto] = useState('wall.jpg');
   const [savedAs, setSavedAs] = useState(null); // encode() of the route as last saved/opened
   const [saving, setSaving] = useState(false);
+  const [routeId, setRouteId] = useState(null); // db id of the saved/opened route
+  const [scale, setScaleState] = useState(() => readPref('scale', 'font')); // font | v
+  const [mine, setMine] = useState({}); // my ascents by route id
+  const setScale = (s) => {
+    setScaleState(s);
+    writePref('scale', s);
+  };
+  const onAscent = (id, a) =>
+    setMine((m) => {
+      const next = { ...m };
+      if (a) next[id] = a;
+      else delete next[id];
+      return next;
+    });
+
+  useEffect(() => {
+    if (!hasBackend) return;
+    myAscents()
+      .then((rows) => setMine(Object.fromEntries(rows.map((a) => [a.route_id, a]))))
+      .catch(() => {}); // offline: the list still works, just without ✓ marks
+  }, []);
 
   useEffect(() => {
     fetch('holds.json')
@@ -114,32 +151,23 @@ export default function App() {
     let name = route.name.trim();
     if (!name) name = (prompt('Route name?') ?? '').trim();
     if (!name) return;
-    let lastSetter = '';
-    try {
-      lastSetter = localStorage.getItem('setter') ?? '';
-    } catch {
-      // storage blocked: just don't prefill
-    }
-    const setter = prompt('Your name (shown as setter)', lastSetter);
+    const setter = prompt('Your name (shown as setter)', readPref('setter', ''));
     if (setter === null) return;
-    try {
-      localStorage.setItem('setter', setter.trim());
-    } catch {
-      // storage blocked: will ask again next time
-    }
-    const r = { ...route, wall, name: name.slice(0, 60), grade: route.grade.trim().slice(0, 10) };
+    writePref('setter', setter.trim());
+    const r = { ...route, wall, name: name.slice(0, 60) };
     setSaving(true);
     try {
-      await saveRoute({
+      const row = await saveRoute({
         wall: r.wall,
         name: r.name,
-        grade: r.grade || null,
+        difficulty: r.difficulty,
         setter: setter.trim().slice(0, 40) || null,
         feet: r.feet,
         holds: r.holds,
       });
       updateRoute(r);
       setSavedAs(encode(r));
+      setRouteId(row.id);
     } catch (e) {
       alert(`Could not save: ${e.message}`);
     } finally {
@@ -150,12 +178,13 @@ export default function App() {
     const r = {
       wall: row.wall,
       name: row.name,
-      grade: row.grade ?? '',
+      difficulty: row.difficulty,
       feet: row.feet,
       holds: row.holds,
     };
     updateRoute(r);
     setSavedAs(encode(r));
+    setRouteId(row.id);
     setMode('route');
     setSel(null);
   }
@@ -193,12 +222,22 @@ export default function App() {
               value={route.name}
               onChange={(e) => updateRoute({ ...route, name: e.target.value })}
             />
-            <input
+            <select
               id="grade"
-              placeholder="Grade"
-              value={route.grade}
-              onChange={(e) => updateRoute({ ...route, grade: e.target.value })}
-            />
+              value={gradeLabel(route.difficulty, scale)}
+              onChange={(e) =>
+                updateRoute({
+                  ...route,
+                  difficulty:
+                    gradeOptions(scale).find((o) => o.label === e.target.value)?.value ?? null,
+                })
+              }
+            >
+              <option value="">Grade</option>
+              {gradeOptions(scale).map((o) => (
+                <option key={o.label}>{o.label}</option>
+              ))}
+            </select>
             {hasBackend && (
               <button id="save" onClick={save} disabled={saving || isSaved}>
                 {saving ? 'Saving…' : isSaved ? 'Saved ✓' : 'Save'}
@@ -209,7 +248,9 @@ export default function App() {
             </button>
             <button
               id="clear"
-              onClick={() => updateRoute({ wall, name: '', grade: '', feet: 'm', holds: {} })}
+              onClick={() =>
+                updateRoute({ wall, name: '', difficulty: null, feet: 'm', holds: {} })
+              }
             >
               Clear
             </button>
@@ -283,12 +324,21 @@ export default function App() {
       </header>
       {mode === 'list' ? (
         hasBackend ? (
-          <RouteList wall={wall} onOpen={openRoute} />
+          <RouteList wall={wall} scale={scale} setScale={setScale} mine={mine} onOpen={openRoute} />
         ) : (
           <p className="msg">The shared route list is not connected yet.</p>
         )
       ) : (
         <>
+          {mode === 'route' && hasBackend && isSaved && routeId && (
+            <Ascent
+              key={routeId}
+              routeId={routeId}
+              mine={mine[routeId]}
+              scale={scale}
+              onChange={onAscent}
+            />
+          )}
           <p className="hint">
             {mode === 'route'
               ? 'Tap a hold, then pick its type below.'

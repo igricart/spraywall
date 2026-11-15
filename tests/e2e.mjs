@@ -134,58 +134,166 @@ try {
   await page.selectOption('#feet', 'a');
   assert.match(await page.evaluate(() => location.hash), /ft=a/, 'feet rule in link');
 
-  // Shared route list against a fake Supabase (only when the build has backend config)
+  // Shared route list + ascents against a fake Supabase (only when the build has backend config)
   if (await page.locator('#save').count()) {
-    const db = [];
-    await page.route('**/rest/v1/routes**', async (req) => {
-      if (req.request().method() === 'POST') {
-        const row = {
-          id: db.length + 1,
-          created_at: new Date().toISOString(),
-          ...req.request().postDataJSON(),
-        };
-        db.unshift(row);
-        return req.fulfill({ status: 201, json: [row] });
+    const db = { routes: [], ascents: [] };
+    const UID = '00000000-0000-4000-8000-000000000001';
+    const median = (xs) => {
+      const s = [...xs].sort((a, b) => a - b);
+      const m = s.length >> 1;
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    const withStats = (r) => {
+      const as = db.ascents.filter((a) => a.route_id === r.id);
+      const votes = [r.difficulty, ...as.map((a) => a.difficulty)].filter((d) => d != null);
+      const stars = as.map((a) => a.rating).filter(Boolean);
+      return {
+        ...r,
+        sends: as.length,
+        rating: stars.length ? stars.reduce((a, b) => a + b) / stars.length : null,
+        votes: votes.length,
+        consensus: votes.length ? median(votes) : null,
+      };
+    };
+    await page.route(/\/(rest|auth)\/v1\//, async (req) => {
+      const r = req.request();
+      const url = new URL(r.url());
+      const single = (r.headers()['accept'] || '').includes('vnd.pgrst.object');
+      const reply = (rows, status = 200) => req.fulfill({ status, json: single ? rows[0] : rows });
+      if (url.pathname.endsWith('/auth/v1/signup')) {
+        const now = Math.floor(Date.now() / 1000);
+        return req.fulfill({
+          json: {
+            access_token: 'fake',
+            token_type: 'bearer',
+            expires_in: 3600,
+            expires_at: now + 3600,
+            refresh_token: 'fake-refresh',
+            user: {
+              id: UID,
+              aud: 'authenticated',
+              role: 'authenticated',
+              is_anonymous: true,
+              app_metadata: {},
+              user_metadata: {},
+              created_at: new Date().toISOString(),
+            },
+          },
+        });
       }
-      return req.fulfill({ json: db });
+      const table = url.pathname.split('/').pop();
+      if (table === 'routes_with_stats') return reply(db.routes.map(withStats));
+      if (table === 'routes' && r.method() === 'POST') {
+        const row = {
+          id: db.routes.length + 1,
+          created_at: new Date().toISOString(),
+          ...r.postDataJSON(),
+        };
+        db.routes.unshift(row);
+        return reply([row], 201);
+      }
+      if (table === 'ascents') {
+        if (r.method() === 'POST') {
+          const a = r.postDataJSON();
+          db.ascents = db.ascents.filter(
+            (x) => !(x.route_id === a.route_id && x.user_id === a.user_id),
+          );
+          db.ascents.push(a);
+          return reply([a], 201);
+        }
+        if (r.method() === 'DELETE') {
+          const rid = +url.searchParams.get('route_id').replace('eq.', '');
+          db.ascents = db.ascents.filter((x) => x.route_id !== rid);
+          return req.fulfill({ status: 204, body: '' });
+        }
+        return reply(db.ascents.filter((a) => a.user_id === UID));
+      }
+      return req.fulfill({ status: 404, json: { message: `unmocked ${url.pathname}` } });
     });
+
+    // save a 6B route
     b = await svgBox();
     await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
     await page.click('#role-s');
-    await page.fill('#grade', '6B');
+    await page.selectOption('#grade', '6B');
     const answers = ['Test route', 'Tester'];
     const onDialog = (d) => d.accept(answers.shift());
     page.on('dialog', onDialog);
     await page.click('#save');
     await page.waitForSelector('#save:has-text("Saved")');
     page.off('dialog', onDialog);
-    assert.equal(db.length, 1, 'route saved');
+    const saved = db.routes[0];
     assert.deepEqual(
-      {
-        name: db[0].name,
-        grade: db[0].grade,
-        setter: db[0].setter,
-        wall: db[0].wall,
-        feet: db[0].feet,
-      },
-      { name: 'Test route', grade: '6B', setter: 'Tester', wall: 1, feet: 'a' },
+      [saved.name, saved.difficulty, saved.setter, saved.wall, saved.feet],
+      ['Test route', 6, 'Tester', 1, 'a'],
+      'route saved with numeric grade',
     );
-    assert.equal(Object.values(db[0].holds)[0], 's');
-    db.push({ ...db[0], id: 2, name: 'Other', grade: '7A', holds: { 1: 't' } });
+    assert.equal(Object.values(saved.holds)[0], 's');
 
+    // log a send: vote 7A, 3 stars (signs in anonymously on the way)
+    await page.click('#sent');
+    await page.selectOption('#vote', '7A');
+    await page.click('#star-3');
+    await page.click('#log');
+    await page.waitForSelector('#sent.done');
+    assert.deepEqual(
+      db.ascents,
+      [{ route_id: 1, user_id: UID, difficulty: 10, rating: 3 }],
+      'ascent logged',
+    );
+    assert.match(await page.locator('#sent').textContent(), /voted 7A/);
+
+    db.routes.push({
+      id: 2,
+      wall: 1,
+      name: 'Other',
+      difficulty: 10,
+      setter: null,
+      feet: 'm',
+      holds: { 1: 't' },
+      created_at: new Date(Date.now() - 864e5).toISOString(),
+    });
+
+    // list: consensus = median(6B, 7A) = 6C; my send ticked
     await page.click('#tab-list');
     await page.waitForSelector('.list li');
-    assert.equal(await page.locator('.list li').count(), 2, 'list shows both routes');
-    await page.selectOption('#grade-filter', '7A');
-    assert.equal(await page.locator('.list li').count(), 1, 'grade filter');
+    const items = page.locator('.list li');
+    assert.equal(await items.count(), 2, 'list shows both routes');
+    const first = await items.first().innerText();
+    assert.match(first, /Test route 6C ✓/, `consensus grade + tick: ${first}`);
+    assert.match(first, /2 votes, set as 6B · 1 send · ★★★/);
+
+    // V scale
+    await page.click('#scale-v');
+    assert.match(await items.first().innerText(), /Test route V5/, 'V scale display');
+    await page.selectOption('#grade-filter', 'V6');
+    assert.equal(await items.count(), 1, 'grade filter in V');
+    await page.selectOption('#grade-filter', '');
+    await page.selectOption('#sent-filter', 'mine');
+    assert.match(await items.innerText(), /Test route/, 'my sends');
+    await page.selectOption('#sent-filter', 'todo');
+    assert.match(await items.innerText(), /Other/, 'not sent yet');
+
+    // open a route
     await page.click('.list li button');
     assert.equal(await page.inputValue('#name'), 'Other', 'opening a route loads it');
+    assert.equal(await page.inputValue('#grade'), 'V6', 'grade shown in chosen scale');
     assert.match(await page.evaluate(() => location.hash), /h=1t/);
     assert.equal(
       await page.locator('#save').textContent(),
       'Saved ✓',
       'opened route counts as saved',
     );
+    assert.equal(await page.locator('#sent').textContent(), 'Sent it ✓', 'not sent yet');
+
+    // remove my send on the first route
+    await page.click('#tab-list');
+    await page.selectOption('#sent-filter', 'mine');
+    await page.click('.list li button');
+    await page.click('#sent');
+    await page.click('#unsend');
+    await page.waitForSelector('#sent:not(.done)');
+    assert.deepEqual(db.ascents, [], 'ascent removed');
   } else console.log('(no backend config in this build: skipped route list checks)');
 
   await page.goto(`http://localhost:${PORT}/#w=9&h=1s`);
