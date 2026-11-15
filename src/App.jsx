@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Wall from './components/Wall.jsx';
-import { decode, encode, nextRole } from './lib/route.js';
+import { FEET, decode, encode, nextRole } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
 
 // In-progress hold mapping is kept per wall version in this browser until exported.
@@ -58,7 +58,7 @@ export default function App() {
     if (mode === 'route') {
       if (id == null) return;
       const roles = { ...route.holds };
-      const r = nextRole(roles[id]);
+      const r = nextRole(roles[id], holds.find((h) => h.id === id)?.foot);
       if (r) roles[id] = r;
       else delete roles[id];
       updateRoute({ ...route, wall, holds: roles });
@@ -100,6 +100,16 @@ export default function App() {
     setTimeout(() => (b.textContent = 'Share'), 1500);
   }
 
+  const selHold = holds.find((h) => h.id === sel);
+  const setFootOnly = (foot) =>
+    updateHolds((hs) =>
+      hs.map((h) => {
+        if (h.id !== sel) return h;
+        const { foot: _drop, ...rest } = h; // keep holds.json small: only store foot:true
+        return foot ? { ...rest, foot: true } : rest;
+      }),
+    );
+
   const oldWall = wall && route.wall !== wall && Object.keys(route.holds).length > 0;
 
   return (
@@ -135,14 +145,25 @@ export default function App() {
             </button>
             <button
               id="clear"
-              onClick={() => updateRoute({ wall, name: '', grade: '', holds: {} })}
+              onClick={() => updateRoute({ wall, name: '', grade: '', feet: 'm', holds: {} })}
             >
               Clear
             </button>
+            <select
+              id="feet"
+              value={route.feet}
+              onChange={(e) => updateRoute({ ...route, feet: e.target.value })}
+            >
+              {Object.entries(FEET).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
             <span className="legend">
               <span className="s">start</span>
-              <span className="h">hand</span>
-              <span className="f">foot</span>
+              <span className="h">hand+foot</span>
+              <span className="f">foot only</span>
               <span className="t">top</span>
             </span>
           </>
@@ -157,6 +178,16 @@ export default function App() {
               value={size}
               onChange={(e) => resize(+e.target.value)}
             />
+            <label>
+              <input
+                id="footonly"
+                type="checkbox"
+                disabled={!selHold}
+                checked={!!selHold?.foot}
+                onChange={(e) => setFootOnly(e.target.checked)}
+              />{' '}
+              foot only
+            </label>
             <button
               id="del"
               disabled={sel == null}
@@ -171,20 +202,29 @@ export default function App() {
               Reset all
             </button>
             <span id="count">{holds.length} holds</span>
-            <button id="export" onClick={exportHolds}>
-              Export holds.json
+            <button id="export" title="Download holds.json" onClick={exportHolds}>
+              Export
             </button>
-            <input
-              id="photo"
-              type="file"
-              accept="image/*"
-              onChange={(e) =>
-                e.target.files[0] && setPhoto(URL.createObjectURL(e.target.files[0]))
-              }
-            />
+            <label className="file" title="Preview another wall photo">
+              Photo
+              <input
+                id="photo"
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) =>
+                  e.target.files[0] && setPhoto(URL.createObjectURL(e.target.files[0]))
+                }
+              />
+            </label>
           </>
         )}
       </header>
+      <p className="hint">
+        {mode === 'route'
+          ? 'Tap holds: start → hand+foot → foot only → top → off. Yellow-ringed holds in Map mode are foot-only.'
+          : 'Map the wall once. Tap to add/select, drag the selected (cyan) hold. Route roles are set in Route mode.'}
+      </p>
       {oldWall && (
         <p className="warn">
           This route was set on wall version {route.wall}; the wall has been remapped since, so
