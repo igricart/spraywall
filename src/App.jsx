@@ -160,10 +160,17 @@ export default function App() {
               ))}
             </select>
             <span className="legend">
-              <span className="s">start</span>
-              <span className="h">hand+foot</span>
-              <span className="f">foot only</span>
-              <span className="t">top</span>
+              {[
+                ['s', 'Start'],
+                ['h', 'Hand+foot'],
+                ['f', 'Foot only'],
+                ['t', 'Top'],
+              ].map(([r, label]) => (
+                <span key={r}>
+                  <i className={r} />
+                  {label}
+                </span>
+              ))}
             </span>
           </>
         ) : (
