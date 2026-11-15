@@ -1,23 +1,38 @@
 # Spray Wall
 
-Static page: wall photo + tappable hold overlay. Routes live in the URL, so sharing = sending a link. No backend yet.
+Wall photo + tappable hold overlay for a gym spray wall. Routes live in the URL, so sharing a route = sending a link. No backend yet.
 
-## Run locally
-    python3 -m http.server 8000      # then open http://localhost:8000
-(Needs a server, not file://, because it loads holds.json.)
-Phone on same wifi: http://<pc-ip>:8000
+Live: https://igricart.github.io/spraywall/
+
+## Develop
+
+    npm install
+    npm run dev          # http://localhost:5173 (also on your LAN IP)
+
+| Command            | What                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `npm run lint`     | ESLint                                                                                                        |
+| `npm run format`   | Prettier (fix) — `format:check` only checks                                                                   |
+| `npm test`         | Unit tests (Vitest) for `src/lib`                                                                             |
+| `npm run build`    | Production build into `dist/`                                                                                 |
+| `npm run test:e2e` | Phone-emulated touch test against the build (run `build` first; needs `npx playwright install chromium` once) |
+
+CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; pushes to `master` deploy to GitHub Pages.
+
+## Layout
+
+    public/            wall.jpg, holds.json (served as-is)
+    src/lib/           pure logic + unit tests (route link format, hold hit-testing)
+    src/components/    Wall.jsx: photo, zoom/pan, hold circles, touch gestures
+    src/App.jsx        state + header controls
+    tests/e2e.mjs      browser test
 
 ## Map the holds (once per wall setup)
-1. Put the straight-on wall photo in `wall.jpg`.
-2. Switch to **Map holds**. Tap a hold to add a circle (pick size with the slider first); tap a circle to remove it.
-   Progress autosaves in this browser.
-3. **Export holds.json** and commit it, replacing the existing file.
+
+1. Put the straight-on wall photo in `public/wall.jpg`. If it's a **new setup**, bump `wall` in `public/holds.json` and empty its `holds` list — old route links then show a "holds may not match" warning instead of silently pointing at the wrong holds.
+2. In the app choose **Map holds**. Tap empty wall to add a hold, drag a hold to move it, slider resizes the selected (cyan) one. Pinch or +/− to zoom, drag empty wall to pan. Progress autosaves in that browser.
+3. **Export holds.json**, replace `public/holds.json`, commit.
 
 ## Make a route
+
 **Route** mode: tap a hold to cycle start → hand → foot → top → off. Add name + grade, then **Share**.
-
-## Test
-    node route.test.mjs
-
-## Next
-Week 2: Supabase (route list, login, ascents) + hosting on Cloudflare Pages.
