@@ -24,7 +24,7 @@ button {
   min-width: 0;
 }
 #grade {
-  width: 4em;
+  width: auto;
 }
 .legend {
   display: flex;
@@ -114,6 +114,37 @@ button {
 .grade {
   color: #0af;
   font-weight: 600;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.sent {
+  color: #2d2;
+  font-weight: 600;
+}
+.ascent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 0 8px 6px;
+}
+#sent.done {
+  background: #1d4d1d;
+  color: #cfc;
+}
+.stars button {
+  padding: 4px 6px;
+  font-size: 20px;
+  background: none;
+  border: 0;
+  color: #555;
+}
+.stars button[aria-pressed='true'] {
+  color: #fd2;
 }
 .hint {
   margin: 0 8px 6px;

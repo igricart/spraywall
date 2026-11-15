@@ -35,11 +35,17 @@ CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; push
 
 ## Make a route
 
-**Route** tab: tap a hold, then pick its type in the bar at the bottom: Start (green), Hand+foot (blue), Foot only (yellow), Top (pink) or Off. Pick the feet rule (marked feet only / any feet / feet follow hands / footless), add name + grade, then **Share**.
+**Route** tab: tap a hold, then pick its type in the bar at the bottom: Start (green), Hand+foot (blue), Foot only (yellow), Top (pink) or Off. Pick the feet rule (marked feet only / any feet / feet follow hands / footless), add name + grade, then **Save** (shared list) or **Share** (link).
+
+## Sends and grades
+
+- Grades are stored as one number (index into the Font scale, see `src/lib/grades.js`); each phone shows Font or V (switch in the Routes tab).
+- **Sent it ✓** on a saved route logs a send with an optional grade vote and 1–3 stars. The first send on a phone silently creates an anonymous Supabase account (needs _Allow anonymous sign-ins_). History is tied to that phone/browser.
+- The list shows the **consensus grade** = median of the setter's grade and all votes (`routes_with_stats` view).
 
 ## Shared route list (Supabase)
 
-- Table + access rules: `supabase/migrations/0001_routes.sql`. Run it once in Supabase → SQL Editor.
+- Tables + access rules: `supabase/migrations/*.sql`, run each once, in order, in Supabase → SQL Editor.
   Anyone can read and add routes; nobody can edit or delete from the app. Delete spam in Supabase → Table Editor → `routes`.
 - Config: `.env` holds `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Both are public by design (the database rules decide what they allow). Never commit the `service_role` key.
 - Without that config the app still works; the Routes tab says the list isn't connected.

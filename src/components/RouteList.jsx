@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { listRoutes } from '../lib/api.js';
+import { SCALES, gradeLabel, gradeOptions } from '../lib/grades.js';
 
-export default function RouteList({ wall, onOpen }) {
+export default function RouteList({ wall, scale, setScale, mine, onOpen }) {
   const [routes, setRoutes] = useState(null);
   const [error, setError] = useState(null);
   const [grade, setGrade] = useState('');
+  const [sent, setSent] = useState('all');
 
   function load() {
     setError(null);
@@ -24,29 +26,68 @@ export default function RouteList({ wall, onOpen }) {
   if (!routes.length)
     return <p className="msg">No routes yet. Create one in the Route tab and press Save.</p>;
 
-  const grades = [...new Set(routes.map((r) => r.grade).filter(Boolean))].sort();
-  const shown = grade ? routes.filter((r) => r.grade === grade) : routes;
+  const shownGrade = (r) => gradeLabel(r.consensus ?? r.difficulty, scale);
+  const present = new Set(routes.map(shownGrade));
+  const grades = gradeOptions(scale)
+    .map((o) => o.label)
+    .filter((g) => present.has(g));
+  const shown = routes.filter(
+    (r) =>
+      (!grade || shownGrade(r) === grade) &&
+      (sent === 'all' || (sent === 'mine') === Boolean(mine[r.id])),
+  );
+
   return (
     <div className="list">
-      <select id="grade-filter" value={grade} onChange={(e) => setGrade(e.target.value)}>
-        <option value="">All grades ({routes.length})</option>
-        {grades.map((g) => (
-          <option key={g}>{g}</option>
-        ))}
-      </select>
-      <ul>
-        {shown.map((r) => (
-          <li key={r.id}>
-            <button onClick={() => onOpen(r)}>
-              <b>{r.name}</b> <span className="grade">{r.grade}</span>
-              <small>
-                {r.setter && `by ${r.setter} · `}
-                {new Date(r.created_at).toLocaleDateString()} · {Object.keys(r.holds).length} holds
-                {r.wall !== wall && ' · old wall'}
-              </small>
+      <div className="filters">
+        <span className="tabs">
+          {Object.entries(SCALES).map(([k, label]) => (
+            <button
+              key={k}
+              id={`scale-${k}`}
+              aria-pressed={scale === k}
+              onClick={() => {
+                setScale(k);
+                setGrade('');
+              }}
+            >
+              {label}
             </button>
-          </li>
-        ))}
+          ))}
+        </span>
+        <select id="grade-filter" value={grade} onChange={(e) => setGrade(e.target.value)}>
+          <option value="">All grades</option>
+          {grades.map((g) => (
+            <option key={g}>{g}</option>
+          ))}
+        </select>
+        <select id="sent-filter" value={sent} onChange={(e) => setSent(e.target.value)}>
+          <option value="all">All ({routes.length})</option>
+          <option value="mine">My sends</option>
+          <option value="todo">Not sent yet</option>
+        </select>
+      </div>
+      <ul>
+        {shown.map((r) => {
+          const set = gradeLabel(r.difficulty, scale);
+          return (
+            <li key={r.id}>
+              <button onClick={() => onOpen(r)}>
+                <b>{r.name}</b> <span className="grade">{shownGrade(r)}</span>
+                {mine[r.id] && <span className="sent"> ✓</span>}
+                <small>
+                  {r.votes > 1 &&
+                    `${r.votes} votes${set && set !== shownGrade(r) ? `, set as ${set}` : ''} · `}
+                  {r.sends > 0 && `${r.sends} send${r.sends > 1 ? 's' : ''} · `}
+                  {r.rating && `${'★'.repeat(Math.round(r.rating))} · `}
+                  {r.setter && `by ${r.setter} · `}
+                  {new Date(r.created_at).toLocaleDateString()}
+                  {r.wall !== wall && ' · old wall'}
+                </small>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

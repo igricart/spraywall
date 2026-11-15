@@ -1,6 +1,9 @@
+import { parseFont } from './grades.js';
+
 // Route <-> URL hash. Roles: s=start h=hand+foot f=foot only t=top/finish (Kilter's model).
-// Hash shape: #w=1&n=Name&g=6B&ft=a&h=12s.40h.88f.90t
+// Hash shape: #w=1&n=Name&d=6&ft=a&h=12s.40h.88f.90t
 //   w  = wall version the hold ids belong to
+//   d  = setter's difficulty (see grades.js); old links had g=<typed Font grade>
 //   ft = feet rule (omitted = 'm')
 export const FEET = {
   m: 'Marked feet only',
@@ -9,11 +12,11 @@ export const FEET = {
   n: 'Footless',
 };
 
-export function encode({ wall = 1, name = '', grade = '', feet = 'm', holds = {} }) {
+export function encode({ wall = 1, name = '', difficulty = null, feet = 'm', holds = {} }) {
   const p = new URLSearchParams();
   p.set('w', wall);
   if (name) p.set('n', name);
-  if (grade) p.set('g', grade);
+  if (difficulty != null) p.set('d', difficulty);
   if (feet !== 'm') p.set('ft', feet);
   p.set(
     'h',
@@ -33,5 +36,8 @@ export function decode(str) {
   }
   // links from before wall versioning have no w -> they were made on wall 1
   const feet = FEET[p.get('ft')] ? p.get('ft') : 'm';
-  return { wall: +p.get('w') || 1, name: p.get('n') || '', grade: p.get('g') || '', feet, holds };
+  const d = p.get('d');
+  const difficulty =
+    d !== null && d !== '' && isFinite(d) ? +d : p.get('g') ? parseFont(p.get('g')) : null;
+  return { wall: +p.get('w') || 1, name: p.get('n') || '', difficulty, feet, holds };
 }
