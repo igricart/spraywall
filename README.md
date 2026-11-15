@@ -27,11 +27,14 @@ CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; push
     src/App.jsx        state + header controls
     tests/e2e.mjs      browser test
 
-## Map the holds (once per wall setup)
+## Wall photo + hold map (admins only)
 
-1. Put the straight-on wall photo in `public/wall.jpg`. If it's a **new setup**, bump `wall` in `public/holds.json` and empty its `holds` list — old route links then show a "holds may not match" warning instead of silently pointing at the wrong holds.
-2. In the app open the **Wall setup** tab. Tap empty wall to add a hold; tap a hold to select it (cyan). Drag the **selected** hold to move it; the **hold size** slider resizes it. Pinch, mouse wheel or +/− zoom the wall, and dragging anywhere else pans it. Progress autosaves in that browser.
-3. **Export** (downloads `holds.json`), replace `public/holds.json`, commit.
+Three layers: the **wall photo** and its **hold circles** (one per physical hold) belong to the admin; **routes** pick circles and colour them (anyone); **sends** are logged by signed-in climbers.
+
+1. Sign in with Google with an account listed in the `admins` table (see `0004_walls.sql`). A **Wall setup** tab appears.
+2. **Photo** uploads a new straight-on wall photo (shrunk to 2400 px). Tap empty wall to add a hold, tap to select (cyan), drag the selected one, **hold size** slider resizes it. Pinch / +− zoom.
+3. Edits are a **draft** on that phone; climbers keep seeing the published wall. **Publish** makes it live; **Discard** throws the draft away.
+4. Publishing with a new photo creates a new wall version, so older routes get an "old wall" tag. Publishing hold fixes on the same photo keeps the version. Hold ids are never reused.
 
 ## Make a route
 

@@ -24,7 +24,9 @@ export default function RouteList({ wall, scale, setScale, mine, onOpen, account
     );
   if (!routes) return <p className="msg">Loading routes…</p>;
   if (!routes.length)
-    return <p className="msg">No routes yet. Create one in the Route tab and press Save.</p>;
+    return (
+      <p className="msg">No routes yet. Create one in the Route tab and press Save. {account}</p>
+    );
 
   const shownGrade = (r) => gradeLabel(r.consensus ?? r.difficulty, scale);
   const present = new Set(routes.map(shownGrade));
