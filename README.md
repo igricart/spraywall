@@ -30,9 +30,9 @@ CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; push
 ## Map the holds (once per wall setup)
 
 1. Put the straight-on wall photo in `public/wall.jpg`. If it's a **new setup**, bump `wall` in `public/holds.json` and empty its `holds` list — old route links then show a "holds may not match" warning instead of silently pointing at the wrong holds.
-2. In the app choose **Map holds**. Tap empty wall to add a hold; tap a hold to select it (cyan). Drag the **selected** hold to move it; the **hold size** slider resizes it. Pinch, mouse wheel or +/− zoom the wall, and dragging anywhere else pans it. Progress autosaves in that browser.
+2. In the app open the **Wall setup** tab. Tap empty wall to add a hold; tap a hold to select it (cyan). Drag the **selected** hold to move it; the **hold size** slider resizes it. Pinch, mouse wheel or +/− zoom the wall, and dragging anywhere else pans it. Progress autosaves in that browser.
 3. **Export** (downloads `holds.json`), replace `public/holds.json`, commit.
 
 ## Make a route
 
-**Route** mode: tap a hold to cycle start (green) → hand+foot (blue) → foot only (yellow) → top (pink) → off. Pick the feet rule (marked feet only / any feet / feet follow hands / footless), add name + grade, then **Share**.
+**Route** tab: tap a hold, then pick its type in the bar at the bottom: Start (green), Hand+foot (blue), Foot only (yellow), Top (pink) or Off. Pick the feet rule (marked feet only / any feet / feet follow hands / footless), add name + grade, then **Share**.

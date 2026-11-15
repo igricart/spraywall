@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Wall from './components/Wall.jsx';
-import { FEET, decode, encode, nextRole } from './lib/route.js';
+import { FEET, decode, encode } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
 
 // In-progress hold mapping is kept per wall version in this browser until exported.
@@ -56,12 +56,7 @@ export default function App() {
 
   function onTap(id, p) {
     if (mode === 'route') {
-      if (id == null) return;
-      const roles = { ...route.holds };
-      const r = nextRole(roles[id]);
-      if (r) roles[id] = r;
-      else delete roles[id];
-      updateRoute({ ...route, wall, holds: roles });
+      setSel(id === sel ? null : id); // opens/closes the type picker
     } else if (id != null) {
       setSel(id);
       setSize(Math.round(holds.find((h) => h.id === id).r * 1000));
@@ -70,6 +65,13 @@ export default function App() {
       updateHolds((hs) => [...hs, h]);
       setSel(h.id);
     }
+  }
+  function setRole(r) {
+    const roles = { ...route.holds };
+    if (r) roles[sel] = r;
+    else delete roles[sel];
+    updateRoute({ ...route, wall, holds: roles });
+    setSel(null);
   }
   const onDrag = (id, x, y) =>
     updateHolds((hs) => hs.map((h) => (h.id === id ? { ...h, x, y } : h)));
@@ -105,17 +107,24 @@ export default function App() {
   return (
     <>
       <header>
-        <select
-          id="mode"
-          value={mode}
-          onChange={(e) => {
-            setMode(e.target.value);
-            setSel(null);
-          }}
-        >
-          <option value="route">Route</option>
-          <option value="map">Map holds</option>
-        </select>
+        <nav className="tabs">
+          {[
+            ['route', 'Route'],
+            ['map', 'Wall setup'],
+          ].map(([m, label]) => (
+            <button
+              key={m}
+              id={`tab-${m}`}
+              aria-pressed={mode === m}
+              onClick={() => {
+                setMode(m);
+                setSel(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
         {mode === 'route' ? (
           <>
             <input
@@ -202,8 +211,8 @@ export default function App() {
       </header>
       <p className="hint">
         {mode === 'route'
-          ? 'Tap holds: start → hand+foot → foot only → top → off.'
-          : 'Map the wall once. Tap to add/select, drag the selected (cyan) hold. Route roles are set in Route mode.'}
+          ? 'Tap a hold, then pick its type below.'
+          : 'Wall setup (once per wall): tap to add or select a hold, drag the selected (cyan) one. Hold types are set in Route.'}
       </p>
       {oldWall && (
         <p className="warn">
@@ -220,6 +229,27 @@ export default function App() {
         onTap={onTap}
         onDrag={onDrag}
       />
+      {mode === 'route' && sel != null && (
+        <div className="picker">
+          {[
+            ['s', 'Start'],
+            ['h', 'Hand+foot'],
+            ['f', 'Foot only'],
+            ['t', 'Top'],
+            [null, 'Off'],
+          ].map(([r, label]) => (
+            <button
+              key={label}
+              id={`role-${r ?? 'off'}`}
+              className={r ?? undefined}
+              aria-pressed={(route.holds[sel] ?? null) === r}
+              onClick={() => setRole(r)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
     </>
   );
 }

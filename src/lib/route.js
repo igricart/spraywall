@@ -2,16 +2,12 @@
 // Hash shape: #w=1&n=Name&g=6B&ft=a&h=12s.40h.88f.90t
 //   w  = wall version the hold ids belong to
 //   ft = feet rule (omitted = 'm')
-export const ROLES = ['s', 'h', 'f', 't'];
 export const FEET = {
   m: 'Marked feet only',
   a: 'Any feet',
   h: 'Feet follow hands',
   n: 'Footless',
 };
-
-// undefined -> s -> h -> f -> t -> undefined (off)
-export const nextRole = (r) => ROLES[ROLES.indexOf(r) + 1];
 
 export function encode({ wall = 1, name = '', grade = '', feet = 'm', holds = {} }) {
   const p = new URLSearchParams();

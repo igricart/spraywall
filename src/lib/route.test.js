@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { encode, decode, nextRole } from './route.js';
+import { encode, decode } from './route.js';
 
 test('round-trips a route through the hash', () => {
   const r = {
@@ -19,16 +19,6 @@ test('drops malformed hold tokens', () => {
 test('empty and pre-versioning links default to wall 1', () => {
   expect(decode('')).toEqual({ wall: 1, name: '', grade: '', feet: 'm', holds: {} });
   expect(decode('#n=Old&h=5s').wall).toBe(1);
-});
-
-test('role cycle ends in off', () => {
-  expect([undefined, 's', 'h', 'f', 't'].map((r) => nextRole(r))).toEqual([
-    's',
-    'h',
-    'f',
-    't',
-    undefined,
-  ]);
 });
 
 test('feet rule: default omitted from link, unknown value falls back', () => {

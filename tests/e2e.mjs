@@ -47,7 +47,7 @@ try {
   const transform = () =>
     page.evaluate(() => document.querySelector('.view > div').style.transform);
 
-  await page.selectOption('#mode', 'map');
+  await page.click('#tab-map');
   let b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   let h = await holds();
@@ -116,10 +116,19 @@ try {
   await page.waitForTimeout(300);
   b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-  await page.selectOption('#mode', 'route');
+  await page.click('#tab-route');
   b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2 + 8, b.y + b.height / 2 + 4);
-  assert.match(await page.evaluate(() => location.hash), /w=1&h=\d+s/, 'route tap marks start');
+  await page.waitForSelector('.picker');
+  await page.click('#role-s');
+  assert.match(await page.evaluate(() => location.hash), /w=1&h=\d+s/, 'picker sets start');
+  assert.equal(await page.locator('.picker').count(), 0, 'picker closes after choosing');
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  await page.click('#role-t');
+  assert.match(await page.evaluate(() => location.hash), /h=\d+t/, 'picker changes type');
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  await page.click('#role-off');
+  assert.match(await page.evaluate(() => location.hash), /h=$/, 'picker Off removes hold');
 
   // feet rule goes into the link
   await page.selectOption('#feet', 'a');
