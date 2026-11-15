@@ -13,7 +13,8 @@
   .legend span { padding: 0 4px; border-bottom: 3px solid; }
   svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
   circle { fill: transparent; pointer-events: all; stroke-width: 6; }
-  .map circle { stroke: #fff; stroke-dasharray: 10 6; }
+  .map circle { stroke: #fff; stroke-dasharray: 10 6; touch-action: none; }
+  .map circle.sel { stroke: #0ff; stroke-dasharray: none; stroke-width: 10; }
   .s { stroke: #2d2; border-color: #2d2; }
   .h { stroke: #29f; border-color: #29f; }
   .f { stroke: #fd2; border-color: #fd2; }
@@ -27,7 +28,7 @@
   <span class="routectl"><input id="name" placeholder="Route name"> <input id="grade" placeholder="Grade"></span>
   <span class="routectl"><button id="share">Share</button> <button id="clear">Clear</button></span>
   <span class="routectl legend"><span class="s">start</span><span class="h">hand</span><span class="f">foot</span><span class="t">top</span></span>
-  <span class="mapctl">size <input id="size" type="range" min="5" max="60" value="18"> <span id="count"></span>
+  <span class="mapctl">size <input id="size" type="range" min="5" max="80" value="18"> <button id="del">Delete</button> <span id="count"></span>
     <button id="export">Export holds.json</button> <input id="photo" type="file" accept="image/*"></span>
 </header>
 <svg><image href="wall.jpg"/><g></g></svg>
@@ -37,6 +38,7 @@ import { encode, decode, nextRole } from './route.js';
 const $ = (s) => document.querySelector(s);
 const svg = $('svg'), img = $('image'), layer = $('g');
 let W = 1, H = 1, holds = [], route = decode(location.hash);
+let sel = null, drag = null; // selected hold id (map mode), active drag
 
 // Holds: in-progress mapping lives in localStorage; everyone else gets the published holds.json.
 // ponytail: hold ids are stable ints; on a wall reset, start a fresh holds.json (old route links then break).
@@ -60,7 +62,8 @@ function draw() {
     c.setAttribute('cx', h.x * W); c.setAttribute('cy', h.y * H); c.setAttribute('r', h.r * W);
     c.dataset.id = h.id;
     const role = route.holds[h.id];
-    if (role) c.setAttribute('class', role);
+    if (role) c.classList.add(role);
+    if (h.id === sel) c.classList.add('sel');
     return c;
   }));
   $('#count').textContent = `${holds.length} holds`;
@@ -70,26 +73,62 @@ function draw() {
 const saveRoute = () => history.replaceState(null, '', '#' + encode(route));
 const saveHolds = () => localStorage.setItem('holds', JSON.stringify(holds));
 
+const isMap = () => document.body.className === 'map';
+const toWall = (e) => new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+const selected = () => holds.find((h) => h.id === sel);
+
+// Map mode: press a hold = select it + start dragging (no redraw mid-drag, it would drop pointer capture).
+svg.addEventListener('pointerdown', (e) => {
+  const id = +e.target.dataset?.id;
+  if (!isMap() || !id) return;
+  sel = id;
+  for (const c of layer.children) c.classList.toggle('sel', +c.dataset.id === sel);
+  const h = selected(), p = toWall(e);
+  $('#size').value = Math.round(h.r * 1000);
+  drag = { h, c: e.target, dx: h.x * W - p.x, dy: h.y * H - p.y, moved: false };
+  e.target.setPointerCapture(e.pointerId);
+});
+svg.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const p = toWall(e), { h, c } = drag;
+  h.x = +Math.min(1, Math.max(0, (p.x + drag.dx) / W)).toFixed(4);
+  h.y = +Math.min(1, Math.max(0, (p.y + drag.dy) / H)).toFixed(4);
+  c.setAttribute('cx', h.x * W); c.setAttribute('cy', h.y * H);
+  drag.moved = true;
+});
+const endDrag = () => { if (drag?.moved) saveHolds(); drag = null; };
+svg.addEventListener('pointerup', endDrag);
+svg.addEventListener('pointercancel', endDrag);
+
 svg.addEventListener('click', (e) => {
   const id = e.target.dataset?.id;
-  if (document.body.className === 'route') {
+  if (!isMap()) {
     if (!id) return;
     const r = nextRole(route.holds[id]);
     if (r) route.holds[id] = r; else delete route.holds[id];
     saveRoute();
   } else if (id) {
-    holds = holds.filter((h) => h.id !== +id); // tap existing hold = remove
-    saveHolds();
+    return; // selection handled on pointerdown
   } else {
-    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
-    const newId = Math.max(0, ...holds.map((h) => h.id)) + 1;
-    holds.push({ id: newId, x: +(p.x / W).toFixed(4), y: +(p.y / H).toFixed(4), r: +($('#size').value / 1000).toFixed(4) });
+    const p = toWall(e);
+    sel = Math.max(0, ...holds.map((h) => h.id)) + 1;
+    holds.push({ id: sel, x: +(p.x / W).toFixed(4), y: +(p.y / H).toFixed(4), r: +($('#size').value / 1000).toFixed(4) });
     saveHolds();
   }
   draw();
 });
 
-$('#mode').onchange = (e) => { document.body.className = e.target.value; draw(); };
+$('#size').oninput = (e) => {
+  const h = selected();
+  if (!h) return;
+  h.r = +(e.target.value / 1000).toFixed(4);
+  saveHolds(); draw();
+};
+$('#del').onclick = () => {
+  holds = holds.filter((h) => h.id !== sel);
+  sel = null; saveHolds(); draw();
+};
+$('#mode').onchange = (e) => { document.body.className = e.target.value; sel = null; draw(); };
 $('#name').oninput = (e) => { route.name = e.target.value; saveRoute(); };
 $('#grade').oninput = (e) => { route.grade = e.target.value; saveRoute(); };
 $('#clear').onclick = () => { route = { name: '', grade: '', holds: {} }; saveRoute(); draw(); };
