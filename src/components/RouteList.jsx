@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { listRoutes } from '../lib/api.js';
 import { SCALES, gradeLabel, gradeOptions } from '../lib/grades.js';
 
-export default function RouteList({ wall, scale, setScale, mine, onOpen }) {
+export default function RouteList({ wall, scale, setScale, mine, onOpen, account }) {
   const [routes, setRoutes] = useState(null);
   const [error, setError] = useState(null);
   const [grade, setGrade] = useState('');
@@ -66,6 +66,7 @@ export default function RouteList({ wall, scale, setScale, mine, onOpen }) {
           <option value="mine">My sends</option>
           <option value="todo">Not sent yet</option>
         </select>
+        {account}
       </div>
       <ul>
         {shown.map((r) => {

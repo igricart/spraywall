@@ -2,6 +2,7 @@ import { parseFont } from './grades.js';
 
 // Route <-> URL hash. Roles: s=start h=hand+foot f=foot only t=top/finish (Kilter's model).
 // Hash shape: #w=1&n=Name&d=6&ft=a&h=12s.40h.88f.90t
+//   i  = id of the saved route in the shared list (dropped on any edit)
 //   w  = wall version the hold ids belong to
 //   d  = setter's difficulty (see grades.js); old links had g=<typed Font grade>
 //   ft = feet rule (omitted = 'm')
@@ -12,8 +13,16 @@ export const FEET = {
   n: 'Footless',
 };
 
-export function encode({ wall = 1, name = '', difficulty = null, feet = 'm', holds = {} }) {
+export function encode({
+  id = null,
+  wall = 1,
+  name = '',
+  difficulty = null,
+  feet = 'm',
+  holds = {},
+}) {
   const p = new URLSearchParams();
+  if (id != null) p.set('i', id);
   p.set('w', wall);
   if (name) p.set('n', name);
   if (difficulty != null) p.set('d', difficulty);
@@ -39,5 +48,12 @@ export function decode(str) {
   const d = p.get('d');
   const difficulty =
     d !== null && d !== '' && isFinite(d) ? +d : p.get('g') ? parseFont(p.get('g')) : null;
-  return { wall: +p.get('w') || 1, name: p.get('n') || '', difficulty, feet, holds };
+  return {
+    id: +p.get('i') || null,
+    wall: +p.get('w') || 1,
+    name: p.get('n') || '',
+    difficulty,
+    feet,
+    holds,
+  };
 }

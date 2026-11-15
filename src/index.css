@@ -146,6 +146,11 @@ button {
 .stars button[aria-pressed='true'] {
   color: #fd2;
 }
+.account {
+  margin-left: auto;
+  color: #aaa;
+  font-size: 14px;
+}
 .hint {
   margin: 0 8px 6px;
   font-size: 13px;
