@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spray Wall</title>
+<style>
+  body { margin: 0; font: 16px system-ui, sans-serif; background: #111; color: #eee; }
+  header { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-items: center; }
+  input, select, button { font: inherit; padding: 4px 8px; }
+  #name { flex: 1 1 8em; min-width: 0; }
+  #grade { width: 4em; }
+  .legend span { padding: 0 4px; border-bottom: 3px solid; }
+  svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
+  circle { fill: transparent; pointer-events: all; stroke-width: 6; }
+  .map circle { stroke: #fff; stroke-dasharray: 10 6; }
+  .s { stroke: #2d2; border-color: #2d2; }
+  .h { stroke: #29f; border-color: #29f; }
+  .f { stroke: #fd2; border-color: #fd2; }
+  .t { stroke: #f2a; border-color: #f2a; }
+  .route .mapctl, .map .routectl { display: none; }
+</style>
+</head>
+<body class="route">
+<header>
+  <select id="mode"><option value="route">Route</option><option value="map">Map holds</option></select>
+  <span class="routectl"><input id="name" placeholder="Route name"> <input id="grade" placeholder="Grade"></span>
+  <span class="routectl"><button id="share">Share</button> <button id="clear">Clear</button></span>
+  <span class="routectl legend"><span class="s">start</span><span class="h">hand</span><span class="f">foot</span><span class="t">top</span></span>
+  <span class="mapctl">size <input id="size" type="range" min="5" max="60" value="18"> <span id="count"></span>
+    <button id="export">Export holds.json</button> <input id="photo" type="file" accept="image/*"></span>
+</header>
+<svg><image href="wall.jpg"/><g></g></svg>
+<script type="module">
+import { encode, decode, nextRole } from './route.js';
+
+const $ = (s) => document.querySelector(s);
+const svg = $('svg'), img = $('image'), layer = $('g');
+let W = 1, H = 1, holds = [], route = decode(location.hash);
+
+// Holds: in-progress mapping lives in localStorage; everyone else gets the published holds.json.
+// ponytail: hold ids are stable ints; on a wall reset, start a fresh holds.json (old route links then break).
+const saved = localStorage.getItem('holds');
+holds = saved ? JSON.parse(saved) : await fetch('holds.json').then((r) => r.json()).catch(() => []);
+
+function setPhoto(src) {
+  const i = new Image();
+  i.onload = () => {
+    W = i.naturalWidth; H = i.naturalHeight;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    img.setAttribute('href', src); img.setAttribute('width', W); img.setAttribute('height', H);
+    draw();
+  };
+  i.src = src;
+}
+
+function draw() {
+  layer.replaceChildren(...holds.map((h) => {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', h.x * W); c.setAttribute('cy', h.y * H); c.setAttribute('r', h.r * W);
+    c.dataset.id = h.id;
+    const role = route.holds[h.id];
+    if (role) c.setAttribute('class', role);
+    return c;
+  }));
+  $('#count').textContent = `${holds.length} holds`;
+  $('#name').value = route.name; $('#grade').value = route.grade;
+}
+
+const saveRoute = () => history.replaceState(null, '', '#' + encode(route));
+const saveHolds = () => localStorage.setItem('holds', JSON.stringify(holds));
+
+svg.addEventListener('click', (e) => {
+  const id = e.target.dataset?.id;
+  if (document.body.className === 'route') {
+    if (!id) return;
+    const r = nextRole(route.holds[id]);
+    if (r) route.holds[id] = r; else delete route.holds[id];
+    saveRoute();
+  } else if (id) {
+    holds = holds.filter((h) => h.id !== +id); // tap existing hold = remove
+    saveHolds();
+  } else {
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const newId = Math.max(0, ...holds.map((h) => h.id)) + 1;
+    holds.push({ id: newId, x: +(p.x / W).toFixed(4), y: +(p.y / H).toFixed(4), r: +($('#size').value / 1000).toFixed(4) });
+    saveHolds();
+  }
+  draw();
+});
+
+$('#mode').onchange = (e) => { document.body.className = e.target.value; draw(); };
+$('#name').oninput = (e) => { route.name = e.target.value; saveRoute(); };
+$('#grade').oninput = (e) => { route.grade = e.target.value; saveRoute(); };
+$('#clear').onclick = () => { route = { name: '', grade: '', holds: {} }; saveRoute(); draw(); };
+$('#share').onclick = async () => {
+  const url = location.href;
+  if (navigator.share) return navigator.share({ title: route.name || 'Spray wall route', url }).catch(() => {});
+  await navigator.clipboard.writeText(url);
+  $('#share').textContent = 'Copied!';
+  setTimeout(() => ($('#share').textContent = 'Share'), 1500);
+};
+$('#export').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(holds)], { type: 'application/json' }));
+  a.download = 'holds.json';
+  a.click();
+};
+$('#photo').onchange = (e) => e.target.files[0] && setPhoto(URL.createObjectURL(e.target.files[0]));
+window.onhashchange = () => { route = decode(location.hash); draw(); };
+
+setPhoto('wall.jpg');
+</script>
+</body>
+</html>
