@@ -62,16 +62,14 @@ export default function App() {
       if (r) roles[id] = r;
       else delete roles[id];
       updateRoute({ ...route, wall, holds: roles });
-    } else if (id == null) {
+    } else if (id != null) {
+      setSel(id);
+      setSize(Math.round(holds.find((h) => h.id === id).r * 1000));
+    } else {
       const h = { id: nextId(holds), x: clamp01(p.x), y: clamp01(p.y), r: size / 1000 };
       updateHolds((hs) => [...hs, h]);
       setSel(h.id);
     }
-  }
-  function onSelect(id) {
-    setSel(id);
-    const h = holds.find((x) => x.id === id);
-    if (h) setSize(Math.round(h.r * 1000));
   }
   const onDrag = (id, x, y) =>
     updateHolds((hs) => hs.map((h) => (h.id === id ? { ...h, x, y } : h)));
@@ -150,7 +148,7 @@ export default function App() {
           </>
         ) : (
           <>
-            size
+            hold size
             <input
               id="size"
               type="range"
@@ -200,7 +198,6 @@ export default function App() {
         sel={sel}
         mode={mode}
         onTap={onTap}
-        onSelect={onSelect}
         onDrag={onDrag}
       />
     </>

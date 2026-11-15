@@ -73,6 +73,16 @@ try {
   [x, y] = await onScreen(moved);
   await drag(x, y, x - 50, y);
   const zmoved = (await holds())[0];
+
+  // only the selected hold drags: add a 2nd hold (now selected), then drag on hold 1 -> pans
+  const view2 = await page.locator('.view').boundingBox();
+  await page.touchscreen.tap(view2.x + 30, view2.y + 30);
+  assert.equal((await holds()).length, 2, 'second hold added');
+  [x, y] = await onScreen(zmoved);
+  const tp = await transform();
+  await drag(x, y, x + 40, y + 40);
+  assert.deepEqual((await holds())[0], zmoved, 'unselected hold does not move');
+  assert.notEqual(await transform(), tp, 'drag on unselected hold pans the wall');
   assert.ok(zmoved.x < moved.x && Math.abs(zmoved.y - moved.y) < 0.01, 'drag works while zoomed');
 
   // two-finger pinch out -> zooms in, adds no hold
@@ -95,7 +105,7 @@ try {
   for (let d = 30; d <= 120; d += 10) await pinch('touchMove', d);
   await pinch('touchEnd');
   assert.ok((await scale()) > s0 * 1.3, `pinch zooms ${s0} -> ${await scale()}`);
-  assert.equal((await holds()).length, 1, 'pinch adds nothing');
+  assert.equal((await holds()).length, 2, 'pinch adds nothing');
 
   page.once('dialog', (d) => d.accept());
   await page.click('#reset');

@@ -5,16 +5,18 @@ import { clamp01, nearest } from '../lib/holds.js';
 const HALO_PX = 25; // finger-sized hit area around each hold
 const TAP_SLOP_PX = 8; // finger jitter that still counts as a tap
 
-// Wall photo + hold circles. Panzoom does pinch/wheel/drag zoom-pan; we intercept a press on a
-// hold (map mode) before panzoom sees it, so that drag moves the hold instead of the picture.
-export default function Wall({ src, holds, roles, sel, mode, onTap, onSelect, onDrag }) {
+// Wall photo + hold circles. Gestures:
+//   pinch / wheel / +- buttons -> zoom the wall,  drag -> pan the wall,  tap -> onTap(holdId|null)
+//   map mode only: drag that STARTS on the selected hold moves it (intercepted before panzoom).
+// Only the selected hold is draggable, so pinches over a crowded wall always zoom.
+export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
   const [size, setSize] = useState(null); // natural image size in px
   const viewRef = useRef(null);
   const paneRef = useRef(null);
   const svgRef = useRef(null);
   const pzRef = useRef(null);
   const live = useRef(null); // latest props for the native listeners below
-  live.current = { holds, mode, onTap, onSelect, onDrag, aspect: size ? size.h / size.w : 1 };
+  live.current = { holds, sel, mode, onTap, onDrag, aspect: size ? size.h / size.w : 1 };
 
   useEffect(() => {
     const img = new Image();
@@ -43,16 +45,18 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onSelect, on
       if (e.target.closest('.zoom')) return; // zoom buttons are not wall taps
       if (g) {
         g.moved = true; // second finger = pinch, never a tap
+        g.h = null; // and stop dragging the hold
         return;
       }
       const p = pt(e);
-      const h = live.current.mode === 'map' ? hit(p) : null;
+      const { mode, sel, holds, aspect } = live.current;
+      const selected = mode === 'map' ? holds.filter((h) => h.id === sel) : [];
+      const h = nearest(selected, p, p.halo, aspect);
       g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, h, moved: false };
       if (h) {
         g.dx = h.x - p.x;
         g.dy = h.y - p.y;
         e.stopPropagation(); // keep panzoom from panning
-        live.current.onSelect(h.id);
       }
     };
     const move = (e) => {
@@ -69,7 +73,7 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onSelect, on
       if (!g || e.pointerId !== g.id) return;
       const s = g;
       g = null;
-      if (s.moved || s.h) return; // pan/pinch/hold-drag, or hold already selected on press
+      if (s.moved) return; // pan, pinch or hold drag
       const p = pt(e);
       live.current.onTap(hit(p)?.id ?? null, p);
     };
