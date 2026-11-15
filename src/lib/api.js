@@ -74,3 +74,19 @@ export async function removeAscent(route_id) {
   const uid = await userId();
   return sb.from('ascents').delete().eq('route_id', route_id).eq('user_id', uid).then(ok);
 }
+
+// ---- Wall (photo + hold map). Everyone reads the latest published row; only admins publish.
+
+export const currentWall = () =>
+  sb.from('walls').select('*').order('id', { ascending: false }).limit(1).maybeSingle().then(ok);
+
+export const isAdmin = (uid) =>
+  sb.from('admins').select('user_id').eq('user_id', uid).maybeSingle().then(ok).then(Boolean);
+
+export const publishWall = (w) => sb.from('walls').insert(w).select().single().then(ok);
+
+export async function uploadPhoto(blob) {
+  const path = `wall-${Date.now()}.jpg`;
+  ok(await sb.storage.from('walls').upload(path, blob, { contentType: 'image/jpeg' }));
+  return sb.storage.from('walls').getPublicUrl(path).data.publicUrl;
+}

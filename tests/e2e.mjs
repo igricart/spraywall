@@ -23,9 +23,136 @@ try {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e));
+
+  // ---- fake Supabase: routes, ascents, walls, admins, storage, Google OAuth
+  const UID = '00000000-0000-4000-8000-000000000001';
+  const db = { routes: [], ascents: [], walls: [], admins: [UID], photos: [] };
+  const median = (xs) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const withStats = (r) => {
+    const as = db.ascents.filter((a) => a.route_id === r.id);
+    const votes = [r.difficulty, ...as.map((a) => a.difficulty)].filter((d) => d != null);
+    const stars = as.map((a) => a.rating).filter(Boolean);
+    return {
+      ...r,
+      sends: as.length,
+      rating: stars.length ? stars.reduce((a, b) => a + b) / stars.length : null,
+      votes: votes.length,
+      consensus: votes.length ? median(votes) : null,
+    };
+  };
+  const wallJpg = await (await fetch(`http://localhost:${PORT}/wall.jpg`)).arrayBuffer();
+  await page.route(/\/(rest|auth|storage)\/v1\//, async (req) => {
+    const r = req.request();
+    const url = new URL(r.url());
+    const single = (r.headers()['accept'] || '').includes('vnd.pgrst.object');
+    const reply = (rows, status = 200) => req.fulfill({ status, json: single ? rows[0] : rows });
+    if (url.pathname.endsWith('/auth/v1/authorize')) {
+      assert.equal(url.searchParams.get('provider'), 'google');
+      const back = new URL(url.searchParams.get('redirect_to'));
+      back.searchParams.set('code', 'fake-code');
+      return req.fulfill({ status: 302, headers: { location: back.href } });
+    }
+    if (url.pathname.endsWith('/auth/v1/token')) {
+      const now = Math.floor(Date.now() / 1000);
+      return req.fulfill({
+        json: {
+          access_token: 'fake',
+          token_type: 'bearer',
+          expires_in: 3600,
+          expires_at: now + 3600,
+          refresh_token: 'fake-refresh',
+          user: {
+            id: UID,
+            aud: 'authenticated',
+            role: 'authenticated',
+            email: 'climber@example.com',
+            user_metadata: { full_name: 'Test Climber' },
+            app_metadata: { provider: 'google' },
+            created_at: new Date().toISOString(),
+          },
+        },
+      });
+    }
+    if (url.pathname.endsWith('/auth/v1/logout')) return req.fulfill({ status: 204, body: '' });
+    if (url.pathname.includes('/storage/v1/object/public/walls/'))
+      return req.fulfill({ contentType: 'image/jpeg', body: Buffer.from(wallJpg) });
+    if (url.pathname.includes('/storage/v1/object/walls/')) {
+      const body = r.postDataBuffer() ?? Buffer.alloc(0);
+      const jpg = body.indexOf(Buffer.from([0xff, 0xd8, 0xff])); // JPEG magic bytes
+      db.photos.push({
+        path: url.pathname.split('/').pop(),
+        jpeg: jpg >= 0 && /image\/jpeg/i.test(body.subarray(0, jpg).toString('latin1')),
+      });
+      return req.fulfill({ json: { Key: `walls/${db.photos.at(-1).path}` } });
+    }
+    const table = url.pathname.split('/').pop();
+    if (table === 'admins')
+      return reply(
+        db.admins
+          .filter((u) => url.searchParams.get('user_id') === `eq.${u}`)
+          .map((u) => ({ user_id: u })),
+      );
+    if (table === 'walls') {
+      if (r.method() === 'POST') {
+        const w = { id: db.walls.length + 1, ...r.postDataJSON() };
+        db.walls.push(w);
+        return reply([w], 201);
+      }
+      return reply(db.walls.slice(-1));
+    }
+    if (table === 'routes_with_stats') return reply(db.routes.map(withStats));
+    if (table === 'routes' && r.method() === 'POST') {
+      const row = {
+        id: db.routes.length + 1,
+        created_at: new Date().toISOString(),
+        ...r.postDataJSON(),
+      };
+      db.routes.unshift(row);
+      return reply([row], 201);
+    }
+    if (table === 'ascents') {
+      if (r.method() === 'POST') {
+        const a = r.postDataJSON();
+        db.ascents = db.ascents.filter(
+          (x) => !(x.route_id === a.route_id && x.user_id === a.user_id),
+        );
+        db.ascents.push(a);
+        return reply([a], 201);
+      }
+      if (r.method() === 'DELETE') {
+        const rid = +url.searchParams.get('route_id').replace('eq.', '');
+        db.ascents = db.ascents.filter((x) => x.route_id !== rid);
+        return req.fulfill({ status: 204, body: '' });
+      }
+      return reply(db.ascents.filter((a) => a.user_id === UID));
+    }
+    return req.fulfill({ status: 404, json: { message: `unmocked ${url.pathname}` } });
+  });
+
+  const hash = () => page.evaluate(() => location.hash);
+  async function answer(fn, ...answers) {
+    const onDialog = (d) => (d.type() === 'prompt' ? d.accept(answers.shift()) : d.accept());
+    page.on('dialog', onDialog);
+    try {
+      await fn();
+    } finally {
+      page.off('dialog', onDialog);
+    }
+  }
+
+  // ---- not signed in: no Wall setup; sign in as admin -> Wall setup appears
   await page.goto(`http://localhost:${PORT}/`);
-  await page.click('#tab-map'); // plain visit may land on the route list
+  await page.waitForSelector('#signin');
+  assert.equal(await page.locator('#tab-map').count(), 0, 'no wall setup for visitors');
+  await page.click('#signin');
+  await page.waitForSelector('#tab-map');
+  await page.click('#tab-map');
   await page.waitForSelector('svg image');
+  assert.equal(await page.locator('#publish').isDisabled(), true, 'nothing to publish yet');
 
   const cdp = await ctx.newCDPSession(page);
   const touch = (type, x, y) =>
@@ -39,7 +166,8 @@ try {
       await touch('touchMove', x0 + ((x1 - x0) * i) / 10, y0 + ((y1 - y0) * i) / 10);
     await touch('touchEnd');
   }
-  const holds = () => page.evaluate(() => JSON.parse(localStorage.getItem('holds-w1') || '[]'));
+  const holds = () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem('wall-draft') || '{"holds":[]}').holds);
   const svgBox = () => page.locator('svg').boundingBox();
   const onScreen = async (h) => {
     const b = await svgBox();
@@ -48,6 +176,7 @@ try {
   const transform = () =>
     page.evaluate(() => document.querySelector('.view > div').style.transform);
 
+  // ---- wall setup gestures (edits a local draft)
   let b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   let h = await holds();
@@ -64,7 +193,6 @@ try {
   await page.waitForTimeout(300);
   const t0 = await transform();
   assert.match(t0, /scale\((?!1\))/, `zoomed in: ${t0}`);
-  b = await svgBox();
   const view = await page.locator('.view').boundingBox();
   await drag(view.x + 40, view.y + 40, view.x + 140, view.y + 90); // empty corner -> pan
   assert.notEqual(await transform(), t0, 'drag on empty wall pans');
@@ -73,8 +201,8 @@ try {
   [x, y] = await onScreen(moved);
   await drag(x, y, x - 50, y);
   const zmoved = (await holds())[0];
+  assert.ok(zmoved.x < moved.x && Math.abs(zmoved.y - moved.y) < 0.01, 'drag works while zoomed');
 
-  // only the selected hold drags: add a 2nd hold (now selected), then drag on hold 1 -> pans
   const view2 = await page.locator('.view').boundingBox();
   await page.touchscreen.tap(view2.x + 30, view2.y + 30);
   assert.equal((await holds()).length, 2, 'second hold added');
@@ -83,9 +211,7 @@ try {
   await drag(x, y, x + 40, y + 40);
   assert.deepEqual((await holds())[0], zmoved, 'unselected hold does not move');
   assert.notEqual(await transform(), tp, 'drag on unselected hold pans the wall');
-  assert.ok(zmoved.x < moved.x && Math.abs(zmoved.y - moved.y) < 0.01, 'drag works while zoomed');
 
-  // two-finger pinch out -> zooms in, adds no hold
   const scale = async () => +(await transform()).match(/scale\(([\d.]+)/)[1];
   const s0 = await scale();
   const c = await page.locator('.view').boundingBox();
@@ -107,8 +233,7 @@ try {
   assert.ok((await scale()) > s0 * 1.3, `pinch zooms ${s0} -> ${await scale()}`);
   assert.equal((await holds()).length, 2, 'pinch adds nothing');
 
-  page.once('dialog', (d) => d.accept());
-  await page.click('#reset');
+  await answer(() => page.click('#reset'));
   assert.equal((await holds()).length, 0, 'reset all clears holds');
 
   await page.click('#zout');
@@ -116,213 +241,160 @@ try {
   await page.waitForTimeout(300);
   b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+
+  // ---- route mode still shows the PUBLISHED wall (empty) until Publish
+  await page.click('#tab-route');
+  assert.equal(await page.locator('circle').count(), 0, 'draft not visible to climbers');
+  await page.click('#tab-map');
+  await answer(() => page.click('#publish'));
+  await page.waitForSelector('#publish:disabled');
+  assert.equal(db.walls.length, 1, 'wall published');
+  assert.deepEqual(
+    [db.walls[0].version, db.walls[0].photo_url, db.walls[0].holds.length],
+    [1, 'wall.jpg', 1],
+  );
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('wall-draft')),
+    null,
+    'draft cleared',
+  );
+
+  // ---- type picker on the published hold
   await page.click('#tab-route');
   b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2 + 8, b.y + b.height / 2 + 4);
   await page.waitForSelector('.picker');
   await page.click('#role-s');
-  assert.match(await page.evaluate(() => location.hash), /w=1&h=\d+s/, 'picker sets start');
+  assert.match(await hash(), /w=1&h=\d+s/, 'picker sets start');
   assert.equal(await page.locator('.picker').count(), 0, 'picker closes after choosing');
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   await page.click('#role-t');
-  assert.match(await page.evaluate(() => location.hash), /h=\d+t/, 'picker changes type');
+  assert.match(await hash(), /h=\d+t/, 'picker changes type');
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   await page.click('#role-off');
-  assert.match(await page.evaluate(() => location.hash), /h=$/, 'picker Off removes hold');
-
-  // feet rule goes into the link
+  assert.match(await hash(), /h=$/, 'picker Off removes hold');
   await page.selectOption('#feet', 'a');
-  assert.match(await page.evaluate(() => location.hash), /ft=a/, 'feet rule in link');
+  assert.match(await hash(), /ft=a/, 'feet rule in link');
 
-  // Shared route list + ascents against a fake Supabase (only when the build has backend config)
-  if (await page.locator('#save').count()) {
-    const db = { routes: [], ascents: [] };
-    const UID = '00000000-0000-4000-8000-000000000001';
-    const median = (xs) => {
-      const s = [...xs].sort((a, b) => a - b);
-      const m = s.length >> 1;
-      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-    };
-    const withStats = (r) => {
-      const as = db.ascents.filter((a) => a.route_id === r.id);
-      const votes = [r.difficulty, ...as.map((a) => a.difficulty)].filter((d) => d != null);
-      const stars = as.map((a) => a.rating).filter(Boolean);
-      return {
-        ...r,
-        sends: as.length,
-        rating: stars.length ? stars.reduce((a, b) => a + b) / stars.length : null,
-        votes: votes.length,
-        consensus: votes.length ? median(votes) : null,
-      };
-    };
-    await page.route(/\/(rest|auth)\/v1\//, async (req) => {
-      const r = req.request();
-      const url = new URL(r.url());
-      const single = (r.headers()['accept'] || '').includes('vnd.pgrst.object');
-      const reply = (rows, status = 200) => req.fulfill({ status, json: single ? rows[0] : rows });
-      // Google round trip: authorize -> back to the app with ?code -> PKCE token exchange
-      if (url.pathname.endsWith('/auth/v1/authorize')) {
-        assert.equal(url.searchParams.get('provider'), 'google');
-        const back = new URL(url.searchParams.get('redirect_to'));
-        back.searchParams.set('code', 'fake-code');
-        return req.fulfill({ status: 302, headers: { location: back.href } });
-      }
-      if (url.pathname.endsWith('/auth/v1/token')) {
-        const now = Math.floor(Date.now() / 1000);
-        return req.fulfill({
-          json: {
-            access_token: 'fake',
-            token_type: 'bearer',
-            expires_in: 3600,
-            expires_at: now + 3600,
-            refresh_token: 'fake-refresh',
-            user: {
-              id: UID,
-              aud: 'authenticated',
-              role: 'authenticated',
-              email: 'climber@example.com',
-              user_metadata: { full_name: 'Test Climber' },
-              app_metadata: { provider: 'google' },
-              created_at: new Date().toISOString(),
-            },
-          },
-        });
-      }
-      if (url.pathname.endsWith('/auth/v1/logout')) return req.fulfill({ status: 204, body: '' });
-      const table = url.pathname.split('/').pop();
-      if (table === 'routes_with_stats') return reply(db.routes.map(withStats));
-      if (table === 'routes' && r.method() === 'POST') {
-        const row = {
-          id: db.routes.length + 1,
-          created_at: new Date().toISOString(),
-          ...r.postDataJSON(),
-        };
-        db.routes.unshift(row);
-        return reply([row], 201);
-      }
-      if (table === 'ascents') {
-        if (r.method() === 'POST') {
-          const a = r.postDataJSON();
-          db.ascents = db.ascents.filter(
-            (x) => !(x.route_id === a.route_id && x.user_id === a.user_id),
-          );
-          db.ascents.push(a);
-          return reply([a], 201);
-        }
-        if (r.method() === 'DELETE') {
-          const rid = +url.searchParams.get('route_id').replace('eq.', '');
-          db.ascents = db.ascents.filter((x) => x.route_id !== rid);
-          return req.fulfill({ status: 204, body: '' });
-        }
-        return reply(db.ascents.filter((a) => a.user_id === UID));
-      }
-      return req.fulfill({ status: 404, json: { message: `unmocked ${url.pathname}` } });
-    });
+  // ---- save a 6B route (no login needed: sign out first)
+  await page.click('#tab-list');
+  await page.click('#signout');
+  await page.waitForSelector('#signin');
+  assert.equal(await page.locator('#tab-map').count(), 0, 'wall setup gone after sign out');
+  await page.click('#tab-route');
+  b = await svgBox();
+  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  await page.click('#role-s');
+  await page.selectOption('#grade', '6B');
+  await answer(() => page.click('#save'), 'Test route', 'Tester');
+  await page.waitForSelector('#save:has-text("Saved")');
+  const saved = db.routes[0];
+  assert.deepEqual(
+    [saved.name, saved.difficulty, saved.setter, saved.wall, saved.feet],
+    ['Test route', 6, 'Tester', 1, 'a'],
+    'route saved with numeric grade',
+  );
+  assert.equal(Object.values(saved.holds)[0], 's');
 
-    // save a 6B route
-    b = await svgBox();
-    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-    await page.click('#role-s');
-    await page.selectOption('#grade', '6B');
-    const answers = ['Test route', 'Tester'];
-    const onDialog = (d) => d.accept(answers.shift());
-    page.on('dialog', onDialog);
-    await page.click('#save');
-    await page.waitForSelector('#save:has-text("Saved")');
-    page.off('dialog', onDialog);
-    const saved = db.routes[0];
-    assert.deepEqual(
-      [saved.name, saved.difficulty, saved.setter, saved.wall, saved.feet],
-      ['Test route', 6, 'Tester', 1, 'a'],
-      'route saved with numeric grade',
-    );
-    assert.equal(Object.values(saved.holds)[0], 's');
+  // ---- sends need Google: sign in, come back to the same route
+  assert.match(await page.locator('#sent').textContent(), /Sign in with Google/);
+  await page.click('#sent');
+  await page.waitForSelector('#sent:has-text("Sent it")');
+  assert.equal(await page.inputValue('#name'), 'Test route', 'route restored after sign-in');
+  assert.match(await hash(), /i=1&/, 'route id kept in link');
 
-    // sends need Google: sign in, come back to the same route
-    assert.match(await page.locator('#sent').textContent(), /Sign in with Google/);
-    await page.click('#sent');
-    await page.waitForURL(/code=fake-code|#/);
-    await page.waitForSelector('#sent:has-text("Sent it")');
-    assert.equal(await page.inputValue('#name'), 'Test route', 'route restored after sign-in');
-    assert.match(await page.evaluate(() => location.hash), /i=1&/, 'route id kept in link');
+  await page.click('#sent');
+  await page.selectOption('#vote', '7A');
+  await page.click('#star-3');
+  await page.click('#log');
+  await page.waitForSelector('#sent.done');
+  assert.deepEqual(
+    db.ascents,
+    [{ route_id: 1, user_id: UID, difficulty: 10, rating: 3 }],
+    'ascent logged',
+  );
+  assert.match(await page.locator('#sent').textContent(), /voted 7A/);
 
-    // log a send: vote 7A, 3 stars
-    await page.click('#sent');
-    await page.selectOption('#vote', '7A');
-    await page.click('#star-3');
-    await page.click('#log');
-    await page.waitForSelector('#sent.done');
-    assert.deepEqual(
-      db.ascents,
-      [{ route_id: 1, user_id: UID, difficulty: 10, rating: 3 }],
-      'ascent logged',
-    );
-    assert.match(await page.locator('#sent').textContent(), /voted 7A/);
+  db.routes.push({
+    id: 2,
+    wall: 1,
+    name: 'Other',
+    difficulty: 10,
+    setter: null,
+    feet: 'm',
+    holds: { 1: 't' },
+    created_at: new Date(Date.now() - 864e5).toISOString(),
+  });
 
-    db.routes.push({
-      id: 2,
-      wall: 1,
-      name: 'Other',
-      difficulty: 10,
-      setter: null,
-      feet: 'm',
-      holds: { 1: 't' },
-      created_at: new Date(Date.now() - 864e5).toISOString(),
-    });
+  // ---- list: consensus = median(6B, 7A) = 6C; my send ticked
+  await page.click('#tab-list');
+  await page.waitForSelector('.list li');
+  const items = page.locator('.list li');
+  assert.equal(await items.count(), 2, 'list shows both routes');
+  const first = await items.first().innerText();
+  assert.match(first, /Test route 6C ✓/, `consensus grade + tick: ${first}`);
+  assert.match(first, /2 votes, set as 6B · 1 send · ★★★/);
+  assert.doesNotMatch(first, /old wall/);
 
-    // list: consensus = median(6B, 7A) = 6C; my send ticked
-    await page.click('#tab-list');
-    await page.waitForSelector('.list li');
-    const items = page.locator('.list li');
-    assert.equal(await items.count(), 2, 'list shows both routes');
-    const first = await items.first().innerText();
-    assert.match(first, /Test route 6C ✓/, `consensus grade + tick: ${first}`);
-    assert.match(first, /2 votes, set as 6B · 1 send · ★★★/);
+  await page.click('#scale-v');
+  assert.match(await items.first().innerText(), /Test route V5/, 'V scale display');
+  await page.selectOption('#grade-filter', 'V6');
+  assert.equal(await items.count(), 1, 'grade filter in V');
+  await page.selectOption('#grade-filter', '');
+  await page.selectOption('#sent-filter', 'mine');
+  assert.match(await items.innerText(), /Test route/, 'my sends');
+  await page.selectOption('#sent-filter', 'todo');
+  assert.match(await items.innerText(), /Other/, 'not sent yet');
 
-    // V scale
-    await page.click('#scale-v');
-    assert.match(await items.first().innerText(), /Test route V5/, 'V scale display');
-    await page.selectOption('#grade-filter', 'V6');
-    assert.equal(await items.count(), 1, 'grade filter in V');
-    await page.selectOption('#grade-filter', '');
-    await page.selectOption('#sent-filter', 'mine');
-    assert.match(await items.innerText(), /Test route/, 'my sends');
-    await page.selectOption('#sent-filter', 'todo');
-    assert.match(await items.innerText(), /Other/, 'not sent yet');
+  await page.click('.list li button');
+  assert.equal(await page.inputValue('#name'), 'Other', 'opening a route loads it');
+  assert.equal(await page.inputValue('#grade'), 'V6', 'grade shown in chosen scale');
+  assert.match(await hash(), /h=1t/);
+  assert.equal(
+    await page.locator('#save').textContent(),
+    'Saved ✓',
+    'opened route counts as saved',
+  );
+  assert.equal(await page.locator('#sent').textContent(), 'Sent it ✓', 'not sent yet');
 
-    // open a route
-    await page.click('.list li button');
-    assert.equal(await page.inputValue('#name'), 'Other', 'opening a route loads it');
-    assert.equal(await page.inputValue('#grade'), 'V6', 'grade shown in chosen scale');
-    assert.match(await page.evaluate(() => location.hash), /h=1t/);
-    assert.equal(
-      await page.locator('#save').textContent(),
-      'Saved ✓',
-      'opened route counts as saved',
-    );
-    assert.equal(await page.locator('#sent').textContent(), 'Sent it ✓', 'not sent yet');
+  await page.click('#tab-list');
+  await page.selectOption('#sent-filter', 'mine');
+  await page.click('.list li button');
+  await page.click('#sent');
+  await page.click('#unsend');
+  await page.waitForSelector('#sent:not(.done)');
+  assert.deepEqual(db.ascents, [], 'ascent removed');
 
-    // remove my send on the first route
-    await page.click('#tab-list');
-    await page.selectOption('#sent-filter', 'mine');
-    await page.click('.list li button');
-    await page.click('#sent');
-    await page.click('#unsend');
-    await page.waitForSelector('#sent:not(.done)');
-    assert.deepEqual(db.ascents, [], 'ascent removed');
+  await page.fill('#name', 'Test route v2');
+  assert.equal(await page.locator('#save').textContent(), 'Save', 'edited route is unsaved');
+  assert.equal(await page.locator('#sent').count(), 0, 'no send on unsaved route');
+  assert.doesNotMatch(await hash(), /i=/);
 
-    // editing an opened route makes it a new unsaved one (no send button)
-    await page.fill('#name', 'Test route v2');
-    assert.equal(await page.locator('#save').textContent(), 'Save', 'edited route is unsaved');
-    assert.equal(await page.locator('#sent').count(), 0, 'no send on unsaved route');
-    assert.doesNotMatch(await page.evaluate(() => location.hash), /i=/);
+  // ---- new photo -> upload (shrunk to jpeg) -> publish as version 2 -> old routes flagged
+  await page.click('#tab-map');
+  await page.setInputFiles('#photo', {
+    name: 'wall.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from(wallJpg),
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('svg image')?.getAttribute('href')?.includes('/storage/'),
+  );
+  assert.equal(db.photos.length, 1, 'photo uploaded');
+  assert.equal(db.photos[0].jpeg, true, 'uploaded as a JPEG');
+  await answer(() => page.click('#publish'));
+  await page.waitForSelector('#publish:disabled');
+  assert.equal(db.walls.at(-1).version, 2, 'new photo = new wall version');
+  assert.match(db.walls.at(-1).photo_url, /\/storage\/v1\/object\/public\/walls\/wall-\d+\.jpg$/);
+  assert.equal(db.walls.at(-1).holds.length, 1, 'holds carried over to the new photo');
+  await page.click('#tab-list');
+  await page.selectOption('#sent-filter', 'all');
+  assert.match(await items.first().innerText(), /old wall/, 'routes on version 1 flagged');
 
-    // account + sign out
-    await page.click('#tab-list');
-    assert.match(await page.locator('.account').innerText(), /Test Climber/);
-    await page.click('#signout');
-    await page.waitForSelector('#signin');
-  } else console.log('(no backend config in this build: skipped route list checks)');
+  // ---- account + sign out
+  assert.match(await page.locator('.account').innerText(), /Test Climber/);
+  await page.click('#signout');
+  await page.waitForSelector('#signin');
 
   await page.goto(`http://localhost:${PORT}/#w=9&h=1s`);
   await page.reload();

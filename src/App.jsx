@@ -4,34 +4,34 @@ import RouteList from './components/RouteList.jsx';
 import Ascent from './components/Ascent.jsx';
 import {
   RETURN_KEY,
+  currentWall,
   hasBackend,
+  isAdmin,
   myAscents,
   onUser,
+  publishWall,
   saveRoute,
   signIn,
   signOut,
+  uploadPhoto,
 } from './lib/api.js';
 import { gradeLabel, gradeOptions } from './lib/grades.js';
 import { FEET, decode, encode } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
+import { shrinkPhoto } from './lib/photo.js';
 
-// In-progress hold mapping is kept per wall version in this browser until exported.
-const storeKey = (wall) => `holds-w${wall}`;
-function readLocal(wall) {
-  try {
-    // 'holds' = key used before wall versioning; it can only belong to wall 1
-    const raw =
-      localStorage.getItem(storeKey(wall)) ?? (wall === 1 ? localStorage.getItem('holds') : null);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
 function readPref(key, fallback) {
   try {
     return localStorage.getItem(key) ?? fallback;
   } catch {
     return fallback;
+  }
+}
+function writePref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage blocked: preference lasts until reload
   }
 }
 // Back from Google sign-in (?code=...): reopen the route we left, if any.
@@ -45,17 +45,43 @@ function startHash() {
   }
   return saved || location.hash;
 }
-function writePref(key, value) {
+
+// Admin's unpublished hold map: { photo (null = keep published photo), holds }.
+// Holds mapped before publishing existed ('holds-w1' / 'holds' keys) become the first draft.
+const DRAFT_KEY = 'wall-draft';
+function readDraft() {
   try {
-    localStorage.setItem(key, value);
+    const d = localStorage.getItem(DRAFT_KEY);
+    if (d) return JSON.parse(d);
+    const legacy = localStorage.getItem('holds-w1') ?? localStorage.getItem('holds');
+    return legacy ? { photo: null, holds: JSON.parse(legacy) } : null;
   } catch {
-    // storage blocked: preference lasts until reload
+    return null;
+  }
+}
+function writeDraft(d) {
+  try {
+    if (d) return localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    for (const k of [DRAFT_KEY, 'holds-w1', 'holds']) localStorage.removeItem(k);
+  } catch {
+    // storage blocked: the draft lasts until reload
   }
 }
 
+// The wall everyone sees: latest published row, else the files shipped with the app.
+async function loadPublished() {
+  const w = hasBackend ? await currentWall().catch(() => null) : null;
+  if (w) return { version: w.version, photo: w.photo_url, holds: w.holds };
+  const f = await fetch('holds.json')
+    .then((r) => r.json())
+    .then(parseHoldsFile)
+    .catch(() => ({ wall: 1, holds: [] }));
+  return { version: f.wall, photo: 'wall.jpg', holds: f.holds };
+}
+
 export default function App() {
-  const [wall, setWall] = useState(null); // hold-map version from holds.json
-  const [holds, setHolds] = useState([]);
+  const [published, setPublished] = useState({ version: null, photo: 'wall.jpg', holds: [] });
+  const [draft, setDraftState] = useState(readDraft);
   const [route, setRoute] = useState(() => decode(startHash()));
   // Plain visit (no route link) lands on the shared list; a route link opens that route.
   const [mode, setMode] = useState(() =>
@@ -63,14 +89,20 @@ export default function App() {
   );
   const [sel, setSel] = useState(null);
   const [size, setSize] = useState(18); // radius for new/selected hold, 1/1000 of image width
-  const [photo, setPhoto] = useState('wall.jpg');
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(''); // wall setup progress message
   const [user, setUser] = useState(null); // Google account, needed for sends
+  const [admin, setAdmin] = useState(!hasBackend); // no backend = local dev: everyone maps
   const [scale, setScaleState] = useState(() => readPref('scale', 'font')); // font | v
   const [mine, setMine] = useState({}); // my ascents by route id
+  const wall = published.version;
   const setScale = (s) => {
     setScaleState(s);
     writePref('scale', s);
+  };
+  const setDraft = (d) => {
+    setDraftState(d);
+    writeDraft(d);
   };
   const onAscent = (id, a) =>
     setMine((m) => {
@@ -82,21 +114,24 @@ export default function App() {
 
   useEffect(() => (hasBackend ? onUser(setUser) : undefined), []);
   useEffect(() => {
-    if (!user) return setMine({});
+    if (!hasBackend) return;
+    if (!user) {
+      setAdmin(false);
+      return setMine({});
+    }
+    isAdmin(user.id)
+      .then(setAdmin)
+      .catch(() => setAdmin(false));
     myAscents()
       .then((rows) => setMine(Object.fromEntries(rows.map((a) => [a.route_id, a]))))
       .catch(() => {}); // offline: the list still works, just without ✓ marks
   }, [user]);
+  useEffect(() => {
+    if (!admin && mode === 'map') setMode('list');
+  }, [admin, mode]);
 
   useEffect(() => {
-    fetch('holds.json')
-      .then((r) => r.json())
-      .then(parseHoldsFile)
-      .catch(() => ({ wall: 1, holds: [] }))
-      .then((f) => {
-        setWall(f.wall);
-        setHolds(readLocal(f.wall) ?? f.holds);
-      });
+    loadPublished().then(setPublished);
     const onHash = () => setRoute(decode(location.hash));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -111,25 +146,34 @@ export default function App() {
   useEffect(() => {
     if (!location.hash && Object.keys(route.holds).length) updateRoute(route); // restored after sign-in
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wall setup edits the draft (created from the published wall on first edit).
   const updateHolds = (fn) =>
-    setHolds((prev) => {
-      const next = fn(prev);
-      try {
-        localStorage.setItem(storeKey(wall), JSON.stringify(next));
-      } catch {
-        // storage blocked (private mode): edits stay in memory until reload
-      }
+    setDraftState((prev) => {
+      const base = prev ?? { photo: null, holds: published.holds };
+      const next = { ...base, holds: fn(base.holds) };
+      writeDraft(next);
       return next;
     });
+  const shown =
+    mode === 'map' && draft
+      ? { photo: draft.photo ?? published.photo, holds: draft.holds }
+      : published;
 
   function onTap(id, p) {
     if (mode === 'route') {
       setSel(id === sel ? null : id); // opens/closes the type picker
     } else if (id != null) {
       setSel(id);
-      setSize(Math.round(holds.find((h) => h.id === id).r * 1000));
+      setSize(Math.round(shown.holds.find((h) => h.id === id).r * 1000));
     } else {
-      const h = { id: nextId(holds), x: clamp01(p.x), y: clamp01(p.y), r: size / 1000 };
+      // ids are never reused, so an old route can't silently point at a different hold
+      const h = {
+        id: nextId([...published.holds, ...shown.holds]),
+        x: clamp01(p.x),
+        y: clamp01(p.y),
+        r: size / 1000,
+      };
       updateHolds((hs) => [...hs, h]);
       setSel(h.id);
     }
@@ -148,17 +192,50 @@ export default function App() {
     updateHolds((hs) => hs.map((h) => (h.id === sel ? { ...h, r: v / 1000 } : h)));
   }
   function resetAll() {
-    if (!confirm(`Delete all ${holds.length} holds? This cannot be undone.`)) return;
+    if (!confirm(`Delete all ${shown.holds.length} holds? This cannot be undone.`)) return;
     updateHolds(() => []);
     setSel(null);
   }
-  function exportHolds() {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(
-      new Blob([JSON.stringify({ wall, holds })], { type: 'application/json' }),
-    );
-    a.download = 'holds.json';
-    a.click();
+  async function changePhoto(file) {
+    if (!file) return;
+    const holds = (draft ?? published).holds;
+    if (!hasBackend) return setDraft({ holds, photo: URL.createObjectURL(file) });
+    setBusy('Uploading photo…');
+    try {
+      setDraft({ holds, photo: await uploadPhoto(await shrinkPhoto(file)) });
+    } catch (e) {
+      alert(`Could not upload the photo: ${e.message}`);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function publish() {
+    // A new photo is a new wall version (old routes get flagged); hold fixes keep the version.
+    const version = draft.photo ? (wall ?? 0) + 1 : (wall ?? 1);
+    const note = draft.photo
+      ? 'This is a new photo, so existing routes will be marked "old wall".'
+      : 'Same photo: existing routes keep working.';
+    if (!confirm(`Publish ${draft.holds.length} holds for everyone? ${note}`)) return;
+    setBusy('Publishing…');
+    try {
+      const w = await publishWall({
+        version,
+        photo_url: draft.photo ?? published.photo,
+        holds: draft.holds,
+      });
+      setPublished({ version: w.version, photo: w.photo_url, holds: w.holds });
+      setDraft(null);
+      setSel(null);
+    } catch (e) {
+      alert(`Could not publish: ${e.message}`);
+    } finally {
+      setBusy('');
+    }
+  }
+  function discard() {
+    if (!confirm('Throw away your unpublished wall changes?')) return;
+    setDraft(null);
+    setSel(null);
   }
   async function share(e) {
     const url = location.href;
@@ -211,16 +288,13 @@ export default function App() {
   const isSaved = route.id != null;
 
   const oldWall = wall && route.wall !== wall && Object.keys(route.holds).length > 0;
+  const tabs = [['list', 'Routes'], ['route', 'Route'], ...(admin ? [['map', 'Wall setup']] : [])];
 
   return (
     <>
       <header>
         <nav className="tabs">
-          {[
-            ['list', 'Routes'],
-            ['route', 'Route'],
-            ['map', 'Wall setup'],
-          ].map(([m, label]) => (
+          {tabs.map(([m, label]) => (
             <button
               key={m}
               id={`tab-${m}`}
@@ -323,22 +397,28 @@ export default function App() {
             <button id="reset" onClick={resetAll}>
               Reset all
             </button>
-            <span id="count">{holds.length} holds</span>
-            <button id="export" title="Download holds.json" onClick={exportHolds}>
-              Export
-            </button>
-            <label className="file" title="Preview another wall photo">
+            <span id="count">{shown.holds.length} holds</span>
+            <label className="file" title="Use a new, straight-on wall photo">
               Photo
               <input
                 id="photo"
                 type="file"
                 accept="image/*"
                 hidden
-                onChange={(e) =>
-                  e.target.files[0] && setPhoto(URL.createObjectURL(e.target.files[0]))
-                }
+                disabled={!!busy}
+                onChange={(e) => changePhoto(e.target.files[0])}
               />
             </label>
+            {hasBackend && (
+              <button id="publish" disabled={!draft || !!busy} onClick={publish}>
+                Publish
+              </button>
+            )}
+            {draft && (
+              <button id="discard" disabled={!!busy} onClick={discard}>
+                Discard
+              </button>
+            )}
           </>
         )}
       </header>
@@ -385,7 +465,10 @@ export default function App() {
           <p className="hint">
             {mode === 'route'
               ? 'Tap a hold, then pick its type below.'
-              : 'Wall setup (once per wall): tap to add or select a hold, drag the selected (cyan) one. Hold types are set in Route.'}
+              : busy ||
+                (draft
+                  ? `Draft: climbers still see the published wall until you press Publish.`
+                  : `Published wall (version ${wall}). Tap to add or select a hold, drag the selected (cyan) one.`)}
           </p>
           {oldWall && (
             <p className="warn">
@@ -394,8 +477,8 @@ export default function App() {
             </p>
           )}
           <Wall
-            src={photo}
-            holds={holds}
+            src={shown.photo}
+            holds={shown.holds}
             roles={mode === 'route' ? route.holds : {}}
             sel={sel}
             mode={mode}
