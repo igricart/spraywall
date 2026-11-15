@@ -31,15 +31,6 @@ test('role cycle ends in off', () => {
   ]);
 });
 
-test('foot-only holds toggle between foot and off', () => {
-  expect([undefined, 'f', 's', 'h'].map((r) => nextRole(r, true))).toEqual([
-    'f',
-    undefined,
-    undefined,
-    undefined,
-  ]);
-});
-
 test('feet rule: default omitted from link, unknown value falls back', () => {
   expect(encode({ holds: {} })).not.toContain('ft=');
   expect(decode('ft=a').feet).toBe('a');

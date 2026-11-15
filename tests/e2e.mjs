@@ -121,20 +121,7 @@ try {
   await page.touchscreen.tap(b.x + b.width / 2 + 8, b.y + b.height / 2 + 4);
   assert.match(await page.evaluate(() => location.hash), /w=1&h=\d+s/, 'route tap marks start');
 
-  // foot-only flag: route taps only toggle foot <-> off; feet rule goes into the link
-  await page.selectOption('#mode', 'map');
-  b = await svgBox();
-  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2); // select the hold
-  await page.check('#footonly');
-  assert.equal((await holds())[0].foot, true, 'hold flagged foot-only');
-  await page.selectOption('#mode', 'route');
-  await page.click('#clear');
-  b = await svgBox();
-  const mid = [b.x + b.width / 2, b.y + b.height / 2];
-  await page.touchscreen.tap(...mid);
-  assert.match(await page.evaluate(() => location.hash), /h=\d+f$/, 'foot-only hold -> foot');
-  await page.touchscreen.tap(...mid);
-  assert.match(await page.evaluate(() => location.hash), /h=$/, 'foot-only hold -> off');
+  // feet rule goes into the link
   await page.selectOption('#feet', 'a');
   assert.match(await page.evaluate(() => location.hash), /ft=a/, 'feet rule in link');
 

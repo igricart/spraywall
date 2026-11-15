@@ -109,9 +109,7 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
                 cx={h.x * size.w}
                 cy={h.y * size.h}
                 r={h.r * size.w}
-                className={[roles[h.id], h.foot && 'fo', h.id === sel && 'sel']
-                  .filter(Boolean)
-                  .join(' ')}
+                className={[roles[h.id], h.id === sel && 'sel'].filter(Boolean).join(' ')}
               />
             ))}
         </svg>

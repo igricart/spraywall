@@ -10,9 +10,8 @@ export const FEET = {
   n: 'Footless',
 };
 
-// undefined -> s -> h -> f -> t -> undefined (off).  Foot-only holds: undefined <-> f.
-export const nextRole = (r, footOnly = false) =>
-  footOnly ? (r ? undefined : 'f') : ROLES[ROLES.indexOf(r) + 1];
+// undefined -> s -> h -> f -> t -> undefined (off)
+export const nextRole = (r) => ROLES[ROLES.indexOf(r) + 1];
 
 export function encode({ wall = 1, name = '', grade = '', feet = 'm', holds = {} }) {
   const p = new URLSearchParams();

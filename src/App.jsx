@@ -58,7 +58,7 @@ export default function App() {
     if (mode === 'route') {
       if (id == null) return;
       const roles = { ...route.holds };
-      const r = nextRole(roles[id], holds.find((h) => h.id === id)?.foot);
+      const r = nextRole(roles[id]);
       if (r) roles[id] = r;
       else delete roles[id];
       updateRoute({ ...route, wall, holds: roles });
@@ -99,16 +99,6 @@ export default function App() {
     b.textContent = 'Copied!';
     setTimeout(() => (b.textContent = 'Share'), 1500);
   }
-
-  const selHold = holds.find((h) => h.id === sel);
-  const setFootOnly = (foot) =>
-    updateHolds((hs) =>
-      hs.map((h) => {
-        if (h.id !== sel) return h;
-        const { foot: _drop, ...rest } = h; // keep holds.json small: only store foot:true
-        return foot ? { ...rest, foot: true } : rest;
-      }),
-    );
 
   const oldWall = wall && route.wall !== wall && Object.keys(route.holds).length > 0;
 
@@ -178,16 +168,6 @@ export default function App() {
               value={size}
               onChange={(e) => resize(+e.target.value)}
             />
-            <label>
-              <input
-                id="footonly"
-                type="checkbox"
-                disabled={!selHold}
-                checked={!!selHold?.foot}
-                onChange={(e) => setFootOnly(e.target.checked)}
-              />{' '}
-              foot only
-            </label>
             <button
               id="del"
               disabled={sel == null}
@@ -222,7 +202,7 @@ export default function App() {
       </header>
       <p className="hint">
         {mode === 'route'
-          ? 'Tap holds: start → hand+foot → foot only → top → off. Yellow-ringed holds in Map mode are foot-only.'
+          ? 'Tap holds: start → hand+foot → foot only → top → off.'
           : 'Map the wall once. Tap to add/select, drag the selected (cyan) hold. Route roles are set in Route mode.'}
       </p>
       {oldWall && (
