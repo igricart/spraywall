@@ -15,9 +15,9 @@
   #wrap { flex: 1; overflow: auto; }
   svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
   .map svg { touch-action: none; } /* map mode handles pan/drag itself */
-  circle { fill: transparent; pointer-events: none; stroke-width: 6; }
-  .map circle { stroke: #fff; stroke-dasharray: 10 6; }
-  .map circle.sel { stroke: #0ff; stroke-dasharray: none; stroke-width: 10; }
+  circle { fill: transparent; pointer-events: none; stroke-width: 3; vector-effect: non-scaling-stroke; }
+  .map circle { stroke: #fff; stroke-dasharray: 5 3; }
+  .map circle.sel { stroke: #0ff; stroke-dasharray: none; stroke-width: 5; }
   .s { stroke: #2d2; border-color: #2d2; }
   .h { stroke: #29f; border-color: #29f; }
   .f { stroke: #fd2; border-color: #fd2; }
