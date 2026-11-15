@@ -1,0 +1,94 @@
+body {
+  margin: 0;
+  font:
+    16px system-ui,
+    sans-serif;
+  background: #111;
+  color: #eee;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  align-items: center;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 6px 10px;
+}
+#name {
+  flex: 1 1 8em;
+  min-width: 0;
+}
+#grade {
+  width: 4em;
+}
+.legend span {
+  padding: 0 4px;
+  border-bottom: 3px solid;
+}
+.warn {
+  margin: 0 8px 8px;
+  padding: 6px 8px;
+  background: #5a3b00;
+}
+
+/* Wall: view clips, pane is what panzoom transforms */
+.view {
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+}
+.view svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.zoom {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+}
+.zoom button {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  opacity: 0.85;
+}
+
+circle {
+  fill: transparent;
+  stroke: none;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.s {
+  stroke: #2d2;
+  border-color: #2d2;
+}
+.h {
+  stroke: #29f;
+  border-color: #29f;
+}
+.f {
+  stroke: #fd2;
+  border-color: #fd2;
+}
+.t {
+  stroke: #f2a;
+  border-color: #f2a;
+}
+.map circle {
+  stroke: #fff;
+  stroke-dasharray: 5 3;
+}
+.map circle.sel {
+  stroke: #0ff;
+  stroke-dasharray: none;
+  stroke-width: 5;
+}
