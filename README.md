@@ -40,7 +40,7 @@ CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; push
 ## Sends and grades
 
 - Grades are stored as one number (index into the Font scale, see `src/lib/grades.js`); each phone shows Font or V (switch in the Routes tab).
-- **Sent it ✓** on a saved route logs a send with an optional grade vote and 1–3 stars. The first send on a phone silently creates an anonymous Supabase account (needs _Allow anonymous sign-ins_). History is tied to that phone/browser.
+- **Sent it ✓** on a saved route logs a send with an optional grade vote and 1–3 stars. Sends need **Sign in with Google**; browsing and creating routes don't. The database refuses sends from anonymous accounts (`0003_google_login.sql`).
 - The list shows the **consensus grade** = median of the setter's grade and all votes (`routes_with_stats` view).
 
 ## Shared route list (Supabase)

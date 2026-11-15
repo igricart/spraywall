@@ -160,7 +160,14 @@ try {
       const url = new URL(r.url());
       const single = (r.headers()['accept'] || '').includes('vnd.pgrst.object');
       const reply = (rows, status = 200) => req.fulfill({ status, json: single ? rows[0] : rows });
-      if (url.pathname.endsWith('/auth/v1/signup')) {
+      // Google round trip: authorize -> back to the app with ?code -> PKCE token exchange
+      if (url.pathname.endsWith('/auth/v1/authorize')) {
+        assert.equal(url.searchParams.get('provider'), 'google');
+        const back = new URL(url.searchParams.get('redirect_to'));
+        back.searchParams.set('code', 'fake-code');
+        return req.fulfill({ status: 302, headers: { location: back.href } });
+      }
+      if (url.pathname.endsWith('/auth/v1/token')) {
         const now = Math.floor(Date.now() / 1000);
         return req.fulfill({
           json: {
@@ -173,14 +180,15 @@ try {
               id: UID,
               aud: 'authenticated',
               role: 'authenticated',
-              is_anonymous: true,
-              app_metadata: {},
-              user_metadata: {},
+              email: 'climber@example.com',
+              user_metadata: { full_name: 'Test Climber' },
+              app_metadata: { provider: 'google' },
               created_at: new Date().toISOString(),
             },
           },
         });
       }
+      if (url.pathname.endsWith('/auth/v1/logout')) return req.fulfill({ status: 204, body: '' });
       const table = url.pathname.split('/').pop();
       if (table === 'routes_with_stats') return reply(db.routes.map(withStats));
       if (table === 'routes' && r.method() === 'POST') {
@@ -230,7 +238,15 @@ try {
     );
     assert.equal(Object.values(saved.holds)[0], 's');
 
-    // log a send: vote 7A, 3 stars (signs in anonymously on the way)
+    // sends need Google: sign in, come back to the same route
+    assert.match(await page.locator('#sent').textContent(), /Sign in with Google/);
+    await page.click('#sent');
+    await page.waitForURL(/code=fake-code|#/);
+    await page.waitForSelector('#sent:has-text("Sent it")');
+    assert.equal(await page.inputValue('#name'), 'Test route', 'route restored after sign-in');
+    assert.match(await page.evaluate(() => location.hash), /i=1&/, 'route id kept in link');
+
+    // log a send: vote 7A, 3 stars
     await page.click('#sent');
     await page.selectOption('#vote', '7A');
     await page.click('#star-3');
@@ -294,6 +310,18 @@ try {
     await page.click('#unsend');
     await page.waitForSelector('#sent:not(.done)');
     assert.deepEqual(db.ascents, [], 'ascent removed');
+
+    // editing an opened route makes it a new unsaved one (no send button)
+    await page.fill('#name', 'Test route v2');
+    assert.equal(await page.locator('#save').textContent(), 'Save', 'edited route is unsaved');
+    assert.equal(await page.locator('#sent').count(), 0, 'no send on unsaved route');
+    assert.doesNotMatch(await page.evaluate(() => location.hash), /i=/);
+
+    // account + sign out
+    await page.click('#tab-list');
+    assert.match(await page.locator('.account').innerText(), /Test Climber/);
+    await page.click('#signout');
+    await page.waitForSelector('#signin');
   } else console.log('(no backend config in this build: skipped route list checks)');
 
   await page.goto(`http://localhost:${PORT}/#w=9&h=1s`);

@@ -3,6 +3,7 @@ import { encode, decode } from './route.js';
 
 test('round-trips a route through the hash', () => {
   const r = {
+    id: 42,
     wall: 2,
     name: 'Crimp & Pray',
     difficulty: 7,
@@ -17,7 +18,14 @@ test('drops malformed hold tokens', () => {
 });
 
 test('empty and pre-versioning links default to wall 1', () => {
-  expect(decode('')).toEqual({ wall: 1, name: '', difficulty: null, feet: 'm', holds: {} });
+  expect(decode('')).toEqual({
+    id: null,
+    wall: 1,
+    name: '',
+    difficulty: null,
+    feet: 'm',
+    holds: {},
+  });
   expect(decode('#n=Old&h=5s').wall).toBe(1);
 });
 

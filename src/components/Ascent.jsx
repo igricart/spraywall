@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { logAscent, removeAscent } from '../lib/api.js';
+import { logAscent, removeAscent, signIn } from '../lib/api.js';
 import { gradeLabel, gradeOptions } from '../lib/grades.js';
 
 // "Sent it" for an opened, saved route: optional grade vote (feeds the consensus) + 1-3 stars.
-export default function Ascent({ routeId, mine, scale, onChange }) {
+export default function Ascent({ routeId, user, mine, scale, onChange }) {
   const [open, setOpen] = useState(false);
   const [vote, setVote] = useState(mine?.difficulty ?? null);
   const [stars, setStars] = useState(mine?.rating ?? null);
@@ -20,6 +20,15 @@ export default function Ascent({ routeId, mine, scale, onChange }) {
       setBusy(false);
     }
   }
+
+  if (!user)
+    return (
+      <div className="ascent">
+        <button id="sent" onClick={() => signIn()}>
+          Sign in with Google to log your send
+        </button>
+      </div>
+    );
 
   if (!open)
     return (

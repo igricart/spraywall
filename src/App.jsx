@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react';
 import Wall from './components/Wall.jsx';
 import RouteList from './components/RouteList.jsx';
 import Ascent from './components/Ascent.jsx';
-import { hasBackend, myAscents, saveRoute } from './lib/api.js';
+import {
+  RETURN_KEY,
+  hasBackend,
+  myAscents,
+  onUser,
+  saveRoute,
+  signIn,
+  signOut,
+} from './lib/api.js';
 import { gradeLabel, gradeOptions } from './lib/grades.js';
 import { FEET, decode, encode } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
@@ -26,6 +34,17 @@ function readPref(key, fallback) {
     return fallback;
   }
 }
+// Back from Google sign-in (?code=...): reopen the route we left, if any.
+function startHash() {
+  if (!new URLSearchParams(location.search).has('code')) return location.hash;
+  const saved = readPref(RETURN_KEY, '');
+  try {
+    localStorage.removeItem(RETURN_KEY);
+  } catch {
+    // nothing to clean up
+  }
+  return saved || location.hash;
+}
 function writePref(key, value) {
   try {
     localStorage.setItem(key, value);
@@ -37,17 +56,16 @@ function writePref(key, value) {
 export default function App() {
   const [wall, setWall] = useState(null); // hold-map version from holds.json
   const [holds, setHolds] = useState([]);
-  const [route, setRoute] = useState(() => decode(location.hash));
+  const [route, setRoute] = useState(() => decode(startHash()));
   // Plain visit (no route link) lands on the shared list; a route link opens that route.
   const [mode, setMode] = useState(() =>
-    hasBackend && !Object.keys(decode(location.hash).holds).length ? 'list' : 'route',
+    hasBackend && !Object.keys(route.holds).length ? 'list' : 'route',
   );
   const [sel, setSel] = useState(null);
   const [size, setSize] = useState(18); // radius for new/selected hold, 1/1000 of image width
   const [photo, setPhoto] = useState('wall.jpg');
-  const [savedAs, setSavedAs] = useState(null); // encode() of the route as last saved/opened
   const [saving, setSaving] = useState(false);
-  const [routeId, setRouteId] = useState(null); // db id of the saved/opened route
+  const [user, setUser] = useState(null); // Google account, needed for sends
   const [scale, setScaleState] = useState(() => readPref('scale', 'font')); // font | v
   const [mine, setMine] = useState({}); // my ascents by route id
   const setScale = (s) => {
@@ -62,12 +80,13 @@ export default function App() {
       return next;
     });
 
+  useEffect(() => (hasBackend ? onUser(setUser) : undefined), []);
   useEffect(() => {
-    if (!hasBackend) return;
+    if (!user) return setMine({});
     myAscents()
       .then((rows) => setMine(Object.fromEntries(rows.map((a) => [a.route_id, a]))))
       .catch(() => {}); // offline: the list still works, just without ✓ marks
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetch('holds.json')
@@ -87,6 +106,11 @@ export default function App() {
     setRoute(r);
     history.replaceState(null, '', '#' + encode(r));
   };
+  // Any edit makes it a new, unsaved route (the shared list has no edit yet).
+  const editRoute = (r) => updateRoute({ ...r, id: null });
+  useEffect(() => {
+    if (!location.hash && Object.keys(route.holds).length) updateRoute(route); // restored after sign-in
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const updateHolds = (fn) =>
     setHolds((prev) => {
       const next = fn(prev);
@@ -114,7 +138,7 @@ export default function App() {
     const roles = { ...route.holds };
     if (r) roles[sel] = r;
     else delete roles[sel];
-    updateRoute({ ...route, wall, holds: roles });
+    editRoute({ ...route, wall, holds: roles });
     setSel(null);
   }
   const onDrag = (id, x, y) =>
@@ -165,9 +189,7 @@ export default function App() {
         feet: r.feet,
         holds: r.holds,
       });
-      updateRoute(r);
-      setSavedAs(encode(r));
-      setRouteId(row.id);
+      updateRoute({ ...r, id: row.id });
     } catch (e) {
       alert(`Could not save: ${e.message}`);
     } finally {
@@ -175,20 +197,18 @@ export default function App() {
     }
   }
   function openRoute(row) {
-    const r = {
+    updateRoute({
+      id: row.id,
       wall: row.wall,
       name: row.name,
       difficulty: row.difficulty,
       feet: row.feet,
       holds: row.holds,
-    };
-    updateRoute(r);
-    setSavedAs(encode(r));
-    setRouteId(row.id);
+    });
     setMode('route');
     setSel(null);
   }
-  const isSaved = savedAs === encode(route);
+  const isSaved = route.id != null;
 
   const oldWall = wall && route.wall !== wall && Object.keys(route.holds).length > 0;
 
@@ -220,13 +240,13 @@ export default function App() {
               id="name"
               placeholder="Route name"
               value={route.name}
-              onChange={(e) => updateRoute({ ...route, name: e.target.value })}
+              onChange={(e) => editRoute({ ...route, name: e.target.value })}
             />
             <select
               id="grade"
               value={gradeLabel(route.difficulty, scale)}
               onChange={(e) =>
-                updateRoute({
+                editRoute({
                   ...route,
                   difficulty:
                     gradeOptions(scale).find((o) => o.label === e.target.value)?.value ?? null,
@@ -257,7 +277,7 @@ export default function App() {
             <select
               id="feet"
               value={route.feet}
-              onChange={(e) => updateRoute({ ...route, feet: e.target.value })}
+              onChange={(e) => editRoute({ ...route, feet: e.target.value })}
             >
               {Object.entries(FEET).map(([k, label]) => (
                 <option key={k} value={k}>
@@ -324,17 +344,40 @@ export default function App() {
       </header>
       {mode === 'list' ? (
         hasBackend ? (
-          <RouteList wall={wall} scale={scale} setScale={setScale} mine={mine} onOpen={openRoute} />
+          <RouteList
+            wall={wall}
+            scale={scale}
+            setScale={setScale}
+            mine={mine}
+            onOpen={openRoute}
+            account={
+              <span className="account">
+                {user ? (
+                  <>
+                    {user.user_metadata?.full_name || user.email}{' '}
+                    <button id="signout" onClick={() => signOut()}>
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <button id="signin" onClick={() => signIn()}>
+                    Sign in with Google
+                  </button>
+                )}
+              </span>
+            }
+          />
         ) : (
           <p className="msg">The shared route list is not connected yet.</p>
         )
       ) : (
         <>
-          {mode === 'route' && hasBackend && isSaved && routeId && (
+          {mode === 'route' && hasBackend && isSaved && (
             <Ascent
-              key={routeId}
-              routeId={routeId}
-              mine={mine[routeId]}
+              key={route.id}
+              routeId={route.id}
+              user={user}
+              mine={mine[route.id]}
               scale={scale}
               onChange={onAscent}
             />
