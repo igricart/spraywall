@@ -24,6 +24,7 @@ try {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e));
   await page.goto(`http://localhost:${PORT}/`);
+  await page.click('#tab-map'); // plain visit may land on the route list
   await page.waitForSelector('svg image');
 
   const cdp = await ctx.newCDPSession(page);
@@ -47,7 +48,6 @@ try {
   const transform = () =>
     page.evaluate(() => document.querySelector('.view > div').style.transform);
 
-  await page.click('#tab-map');
   let b = await svgBox();
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   let h = await holds();
@@ -133,6 +133,60 @@ try {
   // feet rule goes into the link
   await page.selectOption('#feet', 'a');
   assert.match(await page.evaluate(() => location.hash), /ft=a/, 'feet rule in link');
+
+  // Shared route list against a fake Supabase (only when the build has backend config)
+  if (await page.locator('#save').count()) {
+    const db = [];
+    await page.route('**/rest/v1/routes**', async (req) => {
+      if (req.request().method() === 'POST') {
+        const row = {
+          id: db.length + 1,
+          created_at: new Date().toISOString(),
+          ...req.request().postDataJSON(),
+        };
+        db.unshift(row);
+        return req.fulfill({ status: 201, json: [row] });
+      }
+      return req.fulfill({ json: db });
+    });
+    b = await svgBox();
+    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+    await page.click('#role-s');
+    await page.fill('#grade', '6B');
+    const answers = ['Test route', 'Tester'];
+    const onDialog = (d) => d.accept(answers.shift());
+    page.on('dialog', onDialog);
+    await page.click('#save');
+    await page.waitForSelector('#save:has-text("Saved")');
+    page.off('dialog', onDialog);
+    assert.equal(db.length, 1, 'route saved');
+    assert.deepEqual(
+      {
+        name: db[0].name,
+        grade: db[0].grade,
+        setter: db[0].setter,
+        wall: db[0].wall,
+        feet: db[0].feet,
+      },
+      { name: 'Test route', grade: '6B', setter: 'Tester', wall: 1, feet: 'a' },
+    );
+    assert.equal(Object.values(db[0].holds)[0], 's');
+    db.push({ ...db[0], id: 2, name: 'Other', grade: '7A', holds: { 1: 't' } });
+
+    await page.click('#tab-list');
+    await page.waitForSelector('.list li');
+    assert.equal(await page.locator('.list li').count(), 2, 'list shows both routes');
+    await page.selectOption('#grade-filter', '7A');
+    assert.equal(await page.locator('.list li').count(), 1, 'grade filter');
+    await page.click('.list li button');
+    assert.equal(await page.inputValue('#name'), 'Other', 'opening a route loads it');
+    assert.match(await page.evaluate(() => location.hash), /h=1t/);
+    assert.equal(
+      await page.locator('#save').textContent(),
+      'Saved ✓',
+      'opened route counts as saved',
+    );
+  } else console.log('(no backend config in this build: skipped route list checks)');
 
   await page.goto(`http://localhost:${PORT}/#w=9&h=1s`);
   await page.reload();
