@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import Wall from './components/Wall.jsx';
+import RouteList from './components/RouteList.jsx';
+import { hasBackend, saveRoute } from './lib/api.js';
 import { FEET, decode, encode } from './lib/route.js';
 import { clamp01, nextId, parseHoldsFile } from './lib/holds.js';
 
@@ -20,10 +22,15 @@ export default function App() {
   const [wall, setWall] = useState(null); // hold-map version from holds.json
   const [holds, setHolds] = useState([]);
   const [route, setRoute] = useState(() => decode(location.hash));
-  const [mode, setMode] = useState('route');
+  // Plain visit (no route link) lands on the shared list; a route link opens that route.
+  const [mode, setMode] = useState(() =>
+    hasBackend && !Object.keys(decode(location.hash).holds).length ? 'list' : 'route',
+  );
   const [sel, setSel] = useState(null);
   const [size, setSize] = useState(18); // radius for new/selected hold, 1/1000 of image width
   const [photo, setPhoto] = useState('wall.jpg');
+  const [savedAs, setSavedAs] = useState(null); // encode() of the route as last saved/opened
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch('holds.json')
@@ -102,6 +109,58 @@ export default function App() {
     setTimeout(() => (b.textContent = 'Share'), 1500);
   }
 
+  async function save() {
+    if (!Object.keys(route.holds).length) return alert('Mark some holds first.');
+    let name = route.name.trim();
+    if (!name) name = (prompt('Route name?') ?? '').trim();
+    if (!name) return;
+    let lastSetter = '';
+    try {
+      lastSetter = localStorage.getItem('setter') ?? '';
+    } catch {
+      // storage blocked: just don't prefill
+    }
+    const setter = prompt('Your name (shown as setter)', lastSetter);
+    if (setter === null) return;
+    try {
+      localStorage.setItem('setter', setter.trim());
+    } catch {
+      // storage blocked: will ask again next time
+    }
+    const r = { ...route, wall, name: name.slice(0, 60), grade: route.grade.trim().slice(0, 10) };
+    setSaving(true);
+    try {
+      await saveRoute({
+        wall: r.wall,
+        name: r.name,
+        grade: r.grade || null,
+        setter: setter.trim().slice(0, 40) || null,
+        feet: r.feet,
+        holds: r.holds,
+      });
+      updateRoute(r);
+      setSavedAs(encode(r));
+    } catch (e) {
+      alert(`Could not save: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+  function openRoute(row) {
+    const r = {
+      wall: row.wall,
+      name: row.name,
+      grade: row.grade ?? '',
+      feet: row.feet,
+      holds: row.holds,
+    };
+    updateRoute(r);
+    setSavedAs(encode(r));
+    setMode('route');
+    setSel(null);
+  }
+  const isSaved = savedAs === encode(route);
+
   const oldWall = wall && route.wall !== wall && Object.keys(route.holds).length > 0;
 
   return (
@@ -109,6 +168,7 @@ export default function App() {
       <header>
         <nav className="tabs">
           {[
+            ['list', 'Routes'],
             ['route', 'Route'],
             ['map', 'Wall setup'],
           ].map(([m, label]) => (
@@ -125,7 +185,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        {mode === 'route' ? (
+        {mode === 'list' ? null : mode === 'route' ? (
           <>
             <input
               id="name"
@@ -139,6 +199,11 @@ export default function App() {
               value={route.grade}
               onChange={(e) => updateRoute({ ...route, grade: e.target.value })}
             />
+            {hasBackend && (
+              <button id="save" onClick={save} disabled={saving || isSaved}>
+                {saving ? 'Saving…' : isSaved ? 'Saved ✓' : 'Save'}
+              </button>
+            )}
             <button id="share" onClick={share}>
               Share
             </button>
@@ -216,46 +281,56 @@ export default function App() {
           </>
         )}
       </header>
-      <p className="hint">
-        {mode === 'route'
-          ? 'Tap a hold, then pick its type below.'
-          : 'Wall setup (once per wall): tap to add or select a hold, drag the selected (cyan) one. Hold types are set in Route.'}
-      </p>
-      {oldWall && (
-        <p className="warn">
-          This route was set on wall version {route.wall}; the wall has been remapped since, so
-          holds may not match.
-        </p>
-      )}
-      <Wall
-        src={photo}
-        holds={holds}
-        roles={mode === 'route' ? route.holds : {}}
-        sel={sel}
-        mode={mode}
-        onTap={onTap}
-        onDrag={onDrag}
-      />
-      {mode === 'route' && sel != null && (
-        <div className="picker">
-          {[
-            ['s', 'Start'],
-            ['h', 'Hand+foot'],
-            ['f', 'Foot only'],
-            ['t', 'Top'],
-            [null, 'Off'],
-          ].map(([r, label]) => (
-            <button
-              key={label}
-              id={`role-${r ?? 'off'}`}
-              className={r ?? undefined}
-              aria-pressed={(route.holds[sel] ?? null) === r}
-              onClick={() => setRole(r)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      {mode === 'list' ? (
+        hasBackend ? (
+          <RouteList wall={wall} onOpen={openRoute} />
+        ) : (
+          <p className="msg">The shared route list is not connected yet.</p>
+        )
+      ) : (
+        <>
+          <p className="hint">
+            {mode === 'route'
+              ? 'Tap a hold, then pick its type below.'
+              : 'Wall setup (once per wall): tap to add or select a hold, drag the selected (cyan) one. Hold types are set in Route.'}
+          </p>
+          {oldWall && (
+            <p className="warn">
+              This route was set on wall version {route.wall}; the wall has been remapped since, so
+              holds may not match.
+            </p>
+          )}
+          <Wall
+            src={photo}
+            holds={holds}
+            roles={mode === 'route' ? route.holds : {}}
+            sel={sel}
+            mode={mode}
+            onTap={onTap}
+            onDrag={onDrag}
+          />
+          {mode === 'route' && sel != null && (
+            <div className="picker">
+              {[
+                ['s', 'Start'],
+                ['h', 'Hand+foot'],
+                ['f', 'Foot only'],
+                ['t', 'Top'],
+                [null, 'Off'],
+              ].map(([r, label]) => (
+                <button
+                  key={label}
+                  id={`role-${r ?? 'off'}`}
+                  className={r ?? undefined}
+                  aria-pressed={(route.holds[sel] ?? null) === r}
+                  onClick={() => setRole(r)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </>
   );
