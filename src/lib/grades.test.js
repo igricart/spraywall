@@ -31,3 +31,30 @@ test('parseFont accepts typed grades in any case', () => {
   expect(parseFont(' 7a+ ')).toBe(FONT.indexOf('7A+'));
   expect(parseFont('V4')).toBeNull();
 });
+
+// Round trips. The stored value is a Font index; switching the display scale only changes labels.
+const pick = (scale, label) => gradeOptions(scale).find((o) => o.label === label).value;
+
+test('Font -> number -> Font is exact for every grade', () => {
+  FONT.forEach((label, d) => {
+    expect(pick('font', gradeLabel(d, 'font'))).toBe(d);
+  });
+});
+
+test('Font -> V -> Font is exact wherever V has its own grade', () => {
+  const vSiblings = ['6A', '6A+', '6B', '6B+', '6C', '6C+', '7B', '7B+']; // pairs V merges
+  for (const label of FONT.filter((g) => !vSiblings.includes(g))) {
+    const viaV = pick('v', gradeLabel(pick('font', label), 'v'));
+    expect(gradeLabel(viaV, 'font')).toBe(label);
+  }
+});
+
+test('Font -> V -> Font never moves more than half a grade, and keeps the V grade', () => {
+  FONT.forEach((label, d) => {
+    const viaV = pick('v', gradeLabel(d, 'v'));
+    expect(Math.abs(viaV - d)).toBeLessThanOrEqual(0.5);
+    expect(gradeLabel(viaV, 'v')).toBe(gradeLabel(d, 'v'));
+  });
+  // documented loss: V3 covers 6A and 6A+, so a 6A re-picked as V3 reads back as 6A+
+  expect(gradeLabel(pick('v', 'V3'), 'font')).toBe('6A+');
+});
