@@ -245,6 +245,11 @@ try {
   // ---- route mode still shows the PUBLISHED wall (empty) until Publish
   await page.click('#tab-route');
   assert.equal(await page.locator('circle').count(), 0, 'draft not visible to climbers');
+  assert.match(
+    await page.locator('#draft-note').innerText(),
+    /1 unpublished holds/,
+    'admin told to publish',
+  );
   await page.click('#tab-map');
   await answer(() => page.click('#publish'));
   await page.waitForSelector('#publish:disabled');

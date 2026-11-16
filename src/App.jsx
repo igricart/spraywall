@@ -467,9 +467,15 @@ export default function App() {
               ? 'Tap a hold, then pick its type below.'
               : busy ||
                 (draft
-                  ? `Draft: climbers still see the published wall until you press Publish.`
+                  ? `Draft (${draft.holds.length} holds): press Publish to use them in Route. Hold types (start, foot…) are picked per route in the Route tab.`
                   : `Published wall (version ${wall}). Tap to add or select a hold, drag the selected (cyan) one.`)}
           </p>
+          {mode === 'route' && admin && draft && (
+            <p className="warn" id="draft-note">
+              You have {draft.holds.length} unpublished holds. Go to Wall setup and press Publish to
+              use them here.
+            </p>
+          )}
           {oldWall && (
             <p className="warn">
               This route was set on wall version {route.wall}; the wall has been remapped since, so
