@@ -68,6 +68,11 @@ const TYPES = [
   ['f', 'Foot only'],
   ['t', 'Top'],
 ];
+// Theme: dark by default (a gym app is used under bright lights and in dim corners alike);
+// Auto follows the phone's setting.
+const THEMES = { dark: 'Dark', light: 'Light', auto: 'Auto' };
+const NEXT_THEME = { dark: 'light', light: 'auto', auto: 'dark' };
+
 const EMPTY = { id: null, name: '', difficulty: null, feet: 'm', holds: [] };
 
 export default function App() {
@@ -92,6 +97,16 @@ export default function App() {
   const [toast, setToast] = useState(null); // { text, kind }
   const [question, setQuestion] = useState(null); // { text, ok, danger, resolve }
   const toastTimer = useRef(null);
+  const [theme, setTheme] = useState(() => readPref('theme', 'dark'));
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    writePref('theme', theme);
+    const dark =
+      theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document
+      .querySelector('meta[name=theme-color]')
+      ?.setAttribute('content', dark ? '#1f2226' : '#ecede8');
+  }, [theme]);
   const wall = wallState.version;
 
   const notify = (text, kind = 'ok') => {
@@ -338,6 +353,14 @@ export default function App() {
       {mode === 'list' && (
         <header className="bar">
           <h1>Spray wall</h1>
+          <button
+            id="theme"
+            className="ghost"
+            aria-label={`Theme: ${THEMES[theme]}. Change theme`}
+            onClick={() => setTheme(NEXT_THEME[theme])}
+          >
+            {THEMES[theme]}
+          </button>
           {hasBackend &&
             (user ? (
               <button id="account" className="ghost" onClick={() => setAccountOpen(true)}>

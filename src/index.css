@@ -16,9 +16,54 @@
   --tape-mid: #fbe08a;
   --tape-hard: #f6b4a6;
   --tape-top: #cbb8f0;
+  --field: #ffffff;
+  --done-bg: #dcf1e1;
+  --photo-bg: #2b2e33;
+  --overlay: rgb(236 237 232 / 0.85);
+  --scrim: rgb(43 46 51 / 0.45);
   --radius: 10px;
   --tap: 48px;
   color-scheme: light;
+}
+
+/* Dark: charcoal, not black; chalk-coloured text. Same accent; tape stays tape. */
+:root[data-theme='dark'] {
+  --chalk: #1f2226;
+  --chalk-deep: #33373d;
+  --graphite: #e7e5dd;
+  --graphite-soft: #a6a9a2;
+  --resin: #e36a62;
+  --field: #2a2e33;
+  --done-bg: #1f3a28;
+  --photo-bg: #15171a;
+  --overlay: rgb(31 34 38 / 0.85);
+  --scrim: rgb(0 0 0 / 0.55);
+  --tape-none: #d9cfb3;
+  --tape-easy: #a9d4ab;
+  --tape-mid: #ecd27c;
+  --tape-hard: #e7a597;
+  --tape-top: #b9a7e0;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='auto'] {
+    --chalk: #1f2226;
+    --chalk-deep: #33373d;
+    --graphite: #e7e5dd;
+    --graphite-soft: #a6a9a2;
+    --resin: #e36a62;
+    --field: #2a2e33;
+    --done-bg: #1f3a28;
+    --photo-bg: #15171a;
+    --overlay: rgb(31 34 38 / 0.85);
+    --scrim: rgb(0 0 0 / 0.55);
+    --tape-none: #d9cfb3;
+    --tape-easy: #a9d4ab;
+    --tape-mid: #ecd27c;
+    --tape-hard: #e7a597;
+    --tape-top: #b9a7e0;
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -96,7 +141,7 @@ button.grow {
 }
 button.done {
   border-color: var(--start);
-  background: #dcf1e1;
+  background: var(--done-bg);
 }
 select,
 input:not([type='range']) {
@@ -104,7 +149,7 @@ input:not([type='range']) {
   padding: 0 12px;
   border: 2px solid var(--graphite-soft);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--field);
 }
 :focus-visible {
   outline: 3px solid var(--plywood);
@@ -305,7 +350,7 @@ input[type='range'] {
   position: relative;
   overflow: hidden;
   margin: 0 auto;
-  background: var(--graphite);
+  background: var(--photo-bg);
 }
 .view svg {
   display: block;
@@ -325,7 +370,7 @@ input[type='range'] {
   padding: 0;
   font-size: 1.4rem;
   border: 0;
-  background: rgb(236 237 232 / 0.85);
+  background: var(--overlay);
 }
 /* thin, slightly see-through ring so the hold itself stays visible */
 circle {
@@ -363,7 +408,7 @@ button.type {
   padding: 0 4px;
   border-width: 0 0 6px;
   border-radius: var(--radius) var(--radius) 4px 4px;
-  background: #fff;
+  background: var(--field);
   font-size: 0.95rem;
   line-height: 1.1;
 }
@@ -429,7 +474,7 @@ button.type[aria-pressed='true'] {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgb(43 46 51 / 0.45);
+  background: var(--scrim);
 }
 .sheet {
   width: 100%;

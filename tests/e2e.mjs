@@ -173,6 +173,17 @@ try {
   const hasBackend = (await page.locator('#new-route').count()) > 0;
   if (hasBackend) {
     await page.waitForSelector('#first-route'); // empty list invites you to set one
+    // dark by default; theme button cycles Dark -> Light -> Auto and is remembered
+    const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    assert.equal(await bg(), 'rgb(31, 34, 38)', 'dark by default');
+    await page.click('#theme');
+    assert.equal(await bg(), 'rgb(236, 237, 232)', 'light theme');
+    await page.reload();
+    await page.waitForSelector('#theme');
+    assert.equal(await page.locator('#theme').innerText(), 'Light', 'theme remembered');
+    await page.click('#theme');
+    await page.click('#theme');
+    assert.equal(await page.locator('#theme').innerText(), 'Dark');
     await page.click('#new-route');
   }
   await page.waitForSelector('svg image');
