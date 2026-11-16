@@ -194,7 +194,7 @@ try {
   const t0 = await transform();
   assert.match(t0, /scale\((?!1\))/, `zoomed in: ${t0}`);
   const view = await page.locator('.view').boundingBox();
-  await drag(view.x + 40, view.y + 40, view.x + 140, view.y + 90); // empty corner -> pan
+  await drag(view.x + 140, view.y + 90, view.x + 40, view.y + 40); // empty area -> pan (keeps the hold in view)
   assert.notEqual(await transform(), t0, 'drag on empty wall pans');
   assert.equal((await holds()).length, 1, 'panning adds nothing');
 
@@ -251,7 +251,7 @@ try {
   assert.equal(db.walls.length, 1, 'wall published');
   assert.deepEqual(
     [db.walls[0].version, db.walls[0].photo_url, db.walls[0].holds.length],
-    [1, 'wall.jpg', 1],
+    [2, 'wall.jpg', 1], // bundled holds.json is wall 2 (gym photo)
   );
   assert.equal(
     await page.evaluate(() => localStorage.getItem('wall-draft')),
@@ -265,7 +265,7 @@ try {
   await page.touchscreen.tap(b.x + b.width / 2 + 8, b.y + b.height / 2 + 4);
   await page.waitForSelector('.picker');
   await page.click('#role-s');
-  assert.match(await hash(), /w=1&h=\d+s/, 'picker sets start');
+  assert.match(await hash(), /w=2&h=\d+s/, 'picker sets start');
   assert.equal(await page.locator('.picker').count(), 0, 'picker closes after choosing');
   await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
   await page.click('#role-t');
@@ -291,7 +291,7 @@ try {
   const saved = db.routes[0];
   assert.deepEqual(
     [saved.name, saved.difficulty, saved.setter, saved.wall, saved.feet],
-    ['Test route', 6, 'Tester', 1, 'a'],
+    ['Test route', 6, 'Tester', 2, 'a'],
     'route saved with numeric grade',
   );
   assert.equal(Object.values(saved.holds)[0], 's');
@@ -317,7 +317,7 @@ try {
 
   db.routes.push({
     id: 2,
-    wall: 1,
+    wall: 2,
     name: 'Other',
     difficulty: 10,
     setter: null,
@@ -370,7 +370,7 @@ try {
   assert.equal(await page.locator('#sent').count(), 0, 'no send on unsaved route');
   assert.doesNotMatch(await hash(), /i=/);
 
-  // ---- new photo -> upload (shrunk to jpeg) -> publish as version 2 -> old routes flagged
+  // ---- new photo -> upload (shrunk to jpeg) -> publish as version 3 -> old routes flagged
   await page.click('#tab-map');
   await page.setInputFiles('#photo', {
     name: 'wall.jpg',
@@ -384,12 +384,12 @@ try {
   assert.equal(db.photos[0].jpeg, true, 'uploaded as a JPEG');
   await answer(() => page.click('#publish'));
   await page.waitForSelector('#publish:disabled');
-  assert.equal(db.walls.at(-1).version, 2, 'new photo = new wall version');
+  assert.equal(db.walls.at(-1).version, 3, 'new photo = new wall version');
   assert.match(db.walls.at(-1).photo_url, /\/storage\/v1\/object\/public\/walls\/wall-\d+\.jpg$/);
   assert.equal(db.walls.at(-1).holds.length, 1, 'holds carried over to the new photo');
   await page.click('#tab-list');
   await page.selectOption('#sent-filter', 'all');
-  assert.match(await items.first().innerText(), /old wall/, 'routes on version 1 flagged');
+  assert.match(await items.first().innerText(), /old wall/, 'routes on version 2 flagged');
 
   // ---- account + sign out
   assert.match(await page.locator('.account').innerText(), /Test Climber/);
