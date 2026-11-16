@@ -76,3 +76,13 @@ export function parseFont(text) {
   const i = FONT.indexOf(String(text).trim().toUpperCase());
   return i < 0 ? null : i;
 }
+
+// Tape colour band, like gyms colour their route tape by difficulty (Font index):
+// 3–5+ easy, 6A–6B+ mid, 6C–7A+ hard, 7B and up very hard.
+export function tapeBand(d) {
+  if (d == null) return 'none';
+  if (d < 4) return 'easy';
+  if (d < 8) return 'mid';
+  if (d < 12) return 'hard';
+  return 'top';
+}

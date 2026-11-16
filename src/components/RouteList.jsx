@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { listRoutes } from '../lib/api.js';
 import { SCALES, gradeLabel, gradeOptions } from '../lib/grades.js';
+import Tape from './Tape.jsx';
 
-export default function RouteList({ wall, scale, setScale, mine, onOpen, account }) {
+export default function RouteList({ wall, scale, setScale, mine, onOpen, onNew }) {
   const [routes, setRoutes] = useState(null);
   const [error, setError] = useState(null);
   const [grade, setGrade] = useState('');
@@ -18,14 +19,22 @@ export default function RouteList({ wall, scale, setScale, mine, onOpen, account
 
   if (error)
     return (
-      <p className="msg">
-        Could not load routes ({error}). <button onClick={load}>Retry</button>
-      </p>
+      <div className="empty">
+        <p>Couldn't load the routes: {error}</p>
+        <button className="primary" onClick={load}>
+          Try again
+        </button>
+      </div>
     );
-  if (!routes) return <p className="msg">Loading routes…</p>;
+  if (!routes) return <p className="empty">Loading routes…</p>;
   if (!routes.length)
     return (
-      <p className="msg">No routes yet. Create one in the Route tab and press Save. {account}</p>
+      <div className="empty">
+        <p>No routes on the wall yet.</p>
+        <button id="first-route" className="primary" onClick={onNew}>
+          Set the first one
+        </button>
+      </div>
     );
 
   const shownGrade = (r) => gradeLabel(r.consensus ?? r.difficulty, scale);
@@ -40,9 +49,9 @@ export default function RouteList({ wall, scale, setScale, mine, onOpen, account
   );
 
   return (
-    <div className="list">
+    <>
       <div className="filters">
-        <span className="tabs">
+        <span className="segmented" role="group" aria-label="Grade scale">
           {Object.entries(SCALES).map(([k, label]) => (
             <button
               key={k}
@@ -57,41 +66,61 @@ export default function RouteList({ wall, scale, setScale, mine, onOpen, account
             </button>
           ))}
         </span>
-        <select id="grade-filter" value={grade} onChange={(e) => setGrade(e.target.value)}>
+        <select
+          id="grade-filter"
+          aria-label="Grade"
+          value={grade}
+          onChange={(e) => setGrade(e.target.value)}
+        >
           <option value="">All grades</option>
           {grades.map((g) => (
             <option key={g}>{g}</option>
           ))}
         </select>
-        <select id="sent-filter" value={sent} onChange={(e) => setSent(e.target.value)}>
-          <option value="all">All ({routes.length})</option>
+        <select
+          id="sent-filter"
+          aria-label="Sends"
+          value={sent}
+          onChange={(e) => setSent(e.target.value)}
+        >
+          <option value="all">All routes ({routes.length})</option>
           <option value="mine">My sends</option>
           <option value="todo">Not sent yet</option>
         </select>
-        {account}
       </div>
-      <ul>
+      {!shown.length && <p className="empty">No routes match these filters.</p>}
+      <ul className="list">
         {shown.map((r) => {
           const set = gradeLabel(r.difficulty, scale);
+          const g = shownGrade(r);
           return (
             <li key={r.id}>
               <button onClick={() => onOpen(r)}>
-                <b>{r.name}</b> <span className="grade">{shownGrade(r)}</span>
-                {mine[r.id] && <span className="sent"> ✓</span>}
-                <small>
-                  {r.votes > 1 &&
-                    `${r.votes} votes${set && set !== shownGrade(r) ? `, set as ${set}` : ''} · `}
-                  {r.sends > 0 && `${r.sends} send${r.sends > 1 ? 's' : ''} · `}
-                  {r.rating && `${'★'.repeat(Math.round(r.rating))} · `}
-                  {r.setter && `by ${r.setter} · `}
-                  {new Date(r.created_at).toLocaleDateString()}
-                  {r.wall !== wall && ' · old wall'}
-                </small>
+                <span className="grade">{g || '?'}</span>
+                <span className="body">
+                  <Tape difficulty={r.consensus ?? r.difficulty}>{r.name}</Tape>
+                  <span className="meta">
+                    {mine[r.id] && <span className="sent">✓ sent</span>}
+                    {r.sends > 0 && (
+                      <span>
+                        {r.sends} send{r.sends > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {r.rating && <span>{'★'.repeat(Math.round(r.rating))}</span>}
+                    {r.votes > 1 && (
+                      <span>
+                        {r.votes} votes{set && set !== g ? `, set as ${set}` : ''}
+                      </span>
+                    )}
+                    {r.setter && <span>by {r.setter}</span>}
+                    {r.wall !== wall && <span className="old">old wall</span>}
+                  </span>
+                </span>
               </button>
             </li>
           );
         })}
       </ul>
-    </div>
+    </>
   );
 }

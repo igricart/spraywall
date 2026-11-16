@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { FONT, gradeLabel, gradeOptions, parseFont } from './grades.js';
+import { FONT, gradeLabel, gradeOptions, parseFont, tapeBand } from './grades.js';
 
 test('Font options are the scale in order', () => {
   expect(gradeOptions('font').map((o) => o.label)).toEqual(FONT);
@@ -57,4 +57,18 @@ test('Font -> V -> Font never moves more than half a grade, and keeps the V grad
   });
   // documented loss: V3 covers 6A and 6A+, so a 6A re-picked as V3 reads back as 6A+
   expect(gradeLabel(pick('v', 'V3'), 'font')).toBe('6A+');
+});
+
+test('tape band follows the grade', () => {
+  const band = (g) => tapeBand(FONT.indexOf(g));
+  expect([band('5+'), band('6A'), band('6B+'), band('6C'), band('7A+'), band('7B')]).toEqual([
+    'easy',
+    'mid',
+    'mid',
+    'hard',
+    'hard',
+    'top',
+  ]);
+  expect(tapeBand(null)).toBe('none');
+  expect(tapeBand(4.5)).toBe('mid'); // V3 vote between 6A and 6A+
 });
