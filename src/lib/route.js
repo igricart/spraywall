@@ -1,10 +1,11 @@
 import { parseFont } from './grades.js';
 
-// Route <-> URL hash. Roles: s=start h=hand+foot f=foot only t=top/finish (Kilter's model).
-// Hash shape: #w=1&n=Name&d=6&ft=a&h=12s.40h.88f.90t
-//   i  = id of the saved route in the shared list (dropped on any edit)
-//   w  = wall version the hold ids belong to
-//   d  = setter's difficulty (see grades.js); old links had g=<typed Font grade>
+// Route <-> URL hash. A route carries its own circles (model B, docs/SPEC.md):
+//   #i=7&w=2&n=Name&d=6&ft=a&c=500.312.18s_612.400.20h
+//   c  = circles: x.y.r in 1/1000 of the photo (r relative to width) + type
+//        s start, h hand+foot, f foot only, t top
+//   i  = id of the saved route (dropped on any edit); w = wall photo version
+//   d  = setter's difficulty (grades.js); old links had g=<typed Font grade>
 //   ft = feet rule (omitted = 'm')
 export const FEET = {
   m: 'Marked feet only',
@@ -12,6 +13,9 @@ export const FEET = {
   h: 'Feet follow hands',
   n: 'Footless',
 };
+export const TYPES = ['s', 'h', 'f', 't'];
+
+const k = (v) => Math.round(v * 1000);
 
 export function encode({
   id = null,
@@ -19,7 +23,7 @@ export function encode({
   name = '',
   difficulty = null,
   feet = 'm',
-  holds = {},
+  holds = [],
 }) {
   const p = new URLSearchParams();
   if (id != null) p.set('i', id);
@@ -27,23 +31,18 @@ export function encode({
   if (name) p.set('n', name);
   if (difficulty != null) p.set('d', difficulty);
   if (feet !== 'm') p.set('ft', feet);
-  p.set(
-    'h',
-    Object.entries(holds)
-      .map(([id, r]) => id + r)
-      .join('.'),
-  );
+  p.set('c', holds.map((h) => `${k(h.x)}.${k(h.y)}.${k(h.r)}${h.t}`).join('_'));
   return p.toString();
 }
 
 export function decode(str) {
   const p = new URLSearchParams(str.replace(/^#/, ''));
-  const holds = {};
-  for (const tok of (p.get('h') || '').split('.')) {
-    const m = /^(\d+)([shft])$/.exec(tok); // drop anything malformed
-    if (m) holds[m[1]] = m[2];
+  const holds = [];
+  for (const tok of (p.get('c') || '').split('_')) {
+    const m = /^(\d{1,4})\.(\d{1,4})\.(\d{1,3})([shft])$/.exec(tok); // drop anything malformed
+    if (m && +m[1] <= 1000 && +m[2] <= 1000 && +m[3] > 0)
+      holds.push({ x: m[1] / 1000, y: m[2] / 1000, r: m[3] / 1000, t: m[4] });
   }
-  // links from before wall versioning have no w -> they were made on wall 1
   const feet = FEET[p.get('ft')] ? p.get('ft') : 'm';
   const d = p.get('d');
   const difficulty =

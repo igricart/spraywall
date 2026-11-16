@@ -2,21 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import Panzoom from '@panzoom/panzoom';
 import { clamp01, nearest } from '../lib/holds.js';
 
-const HALO_PX = 25; // finger-sized hit area around each hold
+const HALO_PX = 25; // finger-sized hit area around each circle
 const TAP_SLOP_PX = 8; // finger jitter that still counts as a tap
 
-// Wall photo + hold circles. Gestures:
-//   pinch / wheel / +- buttons -> zoom the wall,  drag -> pan the wall,  tap -> onTap(holdId|null)
-//   map mode only: drag that STARTS on the selected hold moves it (intercepted before panzoom).
-// Only the selected hold is draggable, so pinches over a crowded wall always zoom.
-export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
+// Wall photo + the route's circles ({x, y, r, t}; index = id). Gestures:
+//   pinch / wheel / +- buttons -> zoom,  drag -> pan,  tap -> onTap(circleIndex | null, point)
+//   a drag that STARTS on the selected circle moves it (intercepted before panzoom).
+// Only the selected circle drags, so pinches over a crowded wall always zoom.
+export default function Wall({ src, circles, sel, onTap, onDrag }) {
   const [size, setSize] = useState(null); // natural image size in px
   const viewRef = useRef(null);
   const paneRef = useRef(null);
   const svgRef = useRef(null);
   const pzRef = useRef(null);
   const live = useRef(null); // latest props for the native listeners below
-  live.current = { holds, sel, mode, onTap, onDrag, aspect: size ? size.h / size.w : 1 };
+  const withIds = circles.map((c, id) => ({ ...c, id }));
+  live.current = { circles: withIds, sel, onTap, onDrag, aspect: size ? size.h / size.w : 1 };
 
   useEffect(() => {
     const img = new Image();
@@ -38,20 +39,22 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
         halo: HALO_PX / r.width,
       };
     };
-    const hit = (p) => nearest(live.current.holds, p, p.halo, live.current.aspect);
+    const hit = (p, list = live.current.circles) => nearest(list, p, p.halo, live.current.aspect);
 
     let g = null; // current one-finger gesture
     const down = (e) => {
       if (e.target.closest('.zoom')) return; // zoom buttons are not wall taps
       if (g) {
         g.moved = true; // second finger = pinch, never a tap
-        g.h = null; // and stop dragging the hold
+        g.h = null; // and stop dragging the circle
         return;
       }
       const p = pt(e);
-      const { mode, sel, holds, aspect } = live.current;
-      const selected = mode === 'map' ? holds.filter((h) => h.id === sel) : [];
-      const h = nearest(selected, p, p.halo, aspect);
+      const { circles, sel } = live.current;
+      const h = hit(
+        p,
+        circles.filter((c) => c.id === sel),
+      );
       g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, h, moved: false };
       if (h) {
         g.dx = h.x - p.x;
@@ -73,7 +76,7 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
       if (!g || e.pointerId !== g.id) return;
       const s = g;
       g = null;
-      if (s.moved) return; // pan, pinch or hold drag
+      if (s.moved) return; // pan, pinch or circle drag
       const p = pt(e);
       live.current.onTap(hit(p)?.id ?? null, p);
     };
@@ -100,16 +103,16 @@ export default function Wall({ src, holds, roles, sel, mode, onTap, onDrag }) {
   return (
     <div className="view" ref={viewRef} style={fit}>
       <div ref={paneRef}>
-        <svg ref={svgRef} className={mode} viewBox={size ? `0 0 ${size.w} ${size.h}` : '0 0 4 3'}>
+        <svg ref={svgRef} viewBox={size ? `0 0 ${size.w} ${size.h}` : '0 0 4 3'}>
           {size && <image href={src} width={size.w} height={size.h} />}
           {size &&
-            holds.map((h) => (
+            withIds.map((c) => (
               <circle
-                key={h.id}
-                cx={h.x * size.w}
-                cy={h.y * size.h}
-                r={h.r * size.w}
-                className={[roles[h.id], h.id === sel && 'sel'].filter(Boolean).join(' ')}
+                key={c.id}
+                cx={c.x * size.w}
+                cy={c.y * size.h}
+                r={c.r * size.w}
+                className={c.id === sel ? `${c.t} sel` : c.t}
               />
             ))}
         </svg>

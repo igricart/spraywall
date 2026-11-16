@@ -64,10 +64,26 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  display: flex;
-  gap: 6px;
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
   background: #222;
+}
+.picker .types {
+  display: flex;
+  gap: 6px;
+}
+.sizer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.sizer input {
+  flex: 1;
+}
+.sizer button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 4px 16px;
 }
 /* :where() keeps this rule weak so the .s/.h/.f/.t colours win */
 :where(.picker) button {
@@ -80,10 +96,7 @@ button {
 .picker button[aria-pressed='true'] {
   outline: 3px solid #fff;
 }
-.route circle.sel {
-  stroke: #fff;
-  stroke-width: 5;
-}
+
 .msg {
   padding: 16px;
 }
@@ -189,15 +202,13 @@ button {
 
 circle {
   fill: transparent;
-  stroke: rgb(255 255 255 / 0.6); /* mapped but not in the route: faint ring to aim at */
-  stroke-width: 1.5;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
 }
-.s,
-.h,
-.f,
-.t {
-  stroke-width: 3;
+/* selected circle: white halo around its type colour */
+circle.sel {
+  stroke-width: 5;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 2px #fff);
 }
 .s {
   stroke: #2d2;
@@ -214,14 +225,4 @@ circle {
 .t {
   stroke: #f2a;
   border-color: #f2a;
-}
-.map circle {
-  stroke: #fff;
-  stroke-width: 3;
-  stroke-dasharray: 5 3;
-}
-.map circle.sel {
-  stroke: #0ff;
-  stroke-dasharray: none;
-  stroke-width: 5;
 }

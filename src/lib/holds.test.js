@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { clamp01, nearest, nextId, parseHoldsFile } from './holds.js';
+import { clamp01, nearest, parseHoldsFile } from './holds.js';
 
 const holds = [
   { id: 1, x: 0.5, y: 0.5, r: 0.01 },
@@ -27,8 +27,6 @@ test('aspect scales vertical distance', () => {
 });
 
 test('helpers', () => {
-  expect(nextId([])).toBe(1);
-  expect(nextId(holds)).toBe(8);
   expect([clamp01(-1), clamp01(0.123456), clamp01(2)]).toEqual([0, 0.1235, 1]);
   expect(parseHoldsFile([holds[0]])).toEqual({ wall: 1, holds: [holds[0]] });
   expect(parseHoldsFile({ wall: 3, holds: [] })).toEqual({ wall: 3, holds: [] });

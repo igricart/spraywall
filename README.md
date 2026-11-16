@@ -27,18 +27,13 @@ CI (`.github/workflows/deploy.yml`) runs all of these on every PR and push; push
     src/App.jsx        state + header controls
     tests/e2e.mjs      browser test
 
-## Wall photo + hold map (admins only)
+## How it works
 
-Three layers: the **wall photo** and its **hold circles** (one per physical hold) belong to the admin; **routes** pick circles and colour them (anyone); **sends** are logged by signed-in climbers.
-
-1. Sign in with Google with an account listed in the `admins` table (see `0004_walls.sql`). A **Wall setup** tab appears.
-2. **Photo** uploads a new straight-on wall photo (shrunk to 2400 px). Tap empty wall to add a hold, tap to select (cyan), drag the selected one, **hold size** slider resizes it. Pinch / +− zoom.
-3. Edits are a **draft** on that phone; climbers keep seeing the published wall. **Publish** makes it live; **Discard** throws the draft away.
-4. Publishing with a new photo creates a new wall version, so older routes get an "old wall" tag. Publishing hold fixes on the same photo keeps the version. Hold ids are never reused.
+See [`docs/SPEC.md`](docs/SPEC.md). Every route carries its own circles (position, size, type); there is no shared hold map. Anyone creates routes; signed-in users update/delete routes (old versions go to `route_backups`), log sends, and change the wall photo.
 
 ## Make a route
 
-**Route** tab: tap a hold, then pick its type in the bar at the bottom: Start (green), Hand+foot (blue), Foot only (yellow), Top (pink) or Off. Pick the feet rule (marked feet only / any feet / feet follow hands / footless), add name + grade, then **Save** (shared list) or **Share** (link).
+**Routes → + New route.** Tap each hold on the photo: a circle appears and the bar at the bottom picks its type (Start, Hand+foot, Foot only, Top, Remove) and size. Drag the selected circle to move it. Add name, grade, feet rule → **Save** (shared list) or **Share** (link). Nothing is stored before Save.
 
 ## Sends and grades
 

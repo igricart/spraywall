@@ -75,18 +75,32 @@ export async function removeAscent(route_id) {
   return sb.from('ascents').delete().eq('route_id', route_id).eq('user_id', uid).then(ok);
 }
 
-// ---- Wall (photo + hold map). Everyone reads the latest published row; only admins publish.
+// ---- Wall photo (signed-in users change it) and route edits (signed-in users; old versions
+// are copied to route_backups by a database trigger first). See docs/SPEC.md.
 
 export const currentWall = () =>
-  sb.from('walls').select('*').order('id', { ascending: false }).limit(1).maybeSingle().then(ok);
+  sb
+    .from('walls')
+    .select('version,photo_url')
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+    .then(ok);
 
-export const isAdmin = (uid) =>
-  sb.from('admins').select('user_id').eq('user_id', uid).maybeSingle().then(ok).then(Boolean);
-
-export const publishWall = (w) => sb.from('walls').insert(w).select().single().then(ok);
+export const newWallVersion = (w) =>
+  sb
+    .from('walls')
+    .insert({ ...w, holds: [] })
+    .select()
+    .single()
+    .then(ok);
 
 export async function uploadPhoto(blob) {
   const path = `wall-${Date.now()}.jpg`;
   ok(await sb.storage.from('walls').upload(path, blob, { contentType: 'image/jpeg' }));
   return sb.storage.from('walls').getPublicUrl(path).data.publicUrl;
 }
+
+export const updateRoute = (id, patch) =>
+  sb.from('routes').update(patch).eq('id', id).select().single().then(ok);
+export const deleteRoute = (id) => sb.from('routes').delete().eq('id', id).then(ok);
