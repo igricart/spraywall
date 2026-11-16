@@ -2,8 +2,6 @@
 
 export const clamp01 = (v) => +Math.min(1, Math.max(0, v)).toFixed(4);
 
-export const nextId = (holds) => Math.max(0, ...holds.map((h) => h.id)) + 1;
-
 // holds.json is {wall, holds}. A bare array is the pre-versioning format = wall 1.
 export const parseHoldsFile = (json) =>
   Array.isArray(json) ? { wall: 1, holds: json } : { wall: json.wall, holds: json.holds };
