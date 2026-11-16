@@ -147,15 +147,6 @@ try {
     page.evaluate(() =>
       [...document.querySelectorAll('svg circle')].map((c) => c.getAttribute('class')),
     );
-  async function answer(fn, ...answers) {
-    const onDialog = (d) => (d.type() === 'prompt' ? d.accept(answers.shift()) : d.accept());
-    page.on('dialog', onDialog);
-    try {
-      await fn();
-    } finally {
-      page.off('dialog', onDialog);
-    }
-  }
   const cdp = await ctx.newCDPSession(page);
   const touch = (type, x, y) =>
     cdp.send('Input.dispatchTouchEvent', {
@@ -174,28 +165,32 @@ try {
   };
   const transform = () =>
     page.evaluate(() => document.querySelector('.view > div').style.transform);
+  const toast = () => page.locator('.toast[role=status]').innerText();
 
-  // ---- start without login: a plain visit lands on Routes; + New route opens an empty route
+  // ---- start without login: a plain visit lands on the route list
   await page.goto(`http://localhost:${PORT}/`);
-  await page.waitForSelector('#tab-route');
+  await page.waitForSelector('#new-route, .hint');
   const hasBackend = (await page.locator('#new-route').count()) > 0;
-  await page.click(hasBackend ? '#new-route' : '#tab-route');
+  if (hasBackend) {
+    await page.waitForSelector('#first-route'); // empty list invites you to set one
+    await page.click('#new-route');
+  }
   await page.waitForSelector('svg image');
   assert.equal((await circles()).length, 0, 'new route has no circles');
 
-  // ---- tap a hold: circle appears (hand+foot) and the picker opens; pick Start
+  // ---- tap a hold: circle appears (hand+foot) and the type bar opens; pick Start
   await page.touchscreen.tap(...(await at(0.5, 0.6)));
-  await page.waitForSelector('.picker');
+  await page.waitForSelector('#role-s');
   assert.deepEqual(await circles(), ['h sel'], 'new circle selected');
   await page.click('#role-s');
   assert.deepEqual(await circles(), ['s sel'], 'type changed to start');
   assert.match(await hash(), /c=500\.600\.\d+s/, 'circle + type in the link');
 
-  // ---- size slider resizes the selected circle; Done closes the picker
+  // ---- size slider resizes the selected circle; Done closes the type bar
   await page.locator('#size').fill('40');
   assert.match(await hash(), /c=500\.600\.40s/, 'resized');
   await page.click('#done');
-  assert.equal(await page.locator('.picker').count(), 0, 'picker closed');
+  assert.equal(await page.locator('#role-s').count(), 0, 'type bar closed');
 
   // ---- more holds: a top and a foot; then add one more and remove it
   await page.touchscreen.tap(...(await at(0.3, 0.2)));
@@ -249,22 +244,28 @@ try {
   for (let i = 0; i < 4; i++) await page.click('#zout');
   await page.waitForTimeout(300);
 
-  await page.selectOption('#feet', 'a');
-  assert.match(await hash(), /ft=a/, 'feet rule in link');
-
-  // ---- the link alone reproduces the route
+  // ---- the link alone reproduces the route (opens in view mode)
   const link = await hash();
   await page.goto(`http://localhost:${PORT}/${link}`);
   await page.reload();
   await page.waitForSelector('svg circle');
   assert.deepEqual((await circles()).sort(), ['f', 's', 't'], 'route restored from link');
+  assert.equal(await page.locator('#edit').count(), 1, 'opens in view mode');
 
   if (hasBackend) {
-    // ---- save without login; nothing reached the db before Save
+    // ---- save without login, via the save form; nothing reached the db before
     assert.equal(db.routes.length, 0, 'nothing saved before Save');
+    await page.click('#edit');
+    await page.click('#save');
+    await page.click('#save-new'); // empty name -> inline problem, no pop-up
+    assert.match(await page.locator('.problem').innerText(), /name/);
+    await page.fill('#name', 'Test route');
     await page.selectOption('#grade', '6B');
-    await answer(() => page.click('#save'), 'Test route', 'Tester');
-    await page.waitForSelector('#save:has-text("Saved")');
+    await page.selectOption('#feet', 'a');
+    await page.fill('#setter', 'Tester');
+    await page.click('#save-new');
+    await page.waitForSelector('#edit');
+    assert.match(await toast(), /Route saved/);
     const saved = db.routes[0];
     assert.deepEqual(
       [saved.name, saved.difficulty, saved.setter, saved.wall, saved.feet, saved.holds.length],
@@ -273,21 +274,23 @@ try {
     );
     assert.deepEqual(saved.holds.map((c) => c.t).sort(), ['f', 's', 't']);
     assert.match(await hash(), /i=1&/, 'route id in link');
+    assert.equal(await page.locator('#route-name').innerText(), 'Test route');
 
-    // ---- not signed in: a changed saved route can only be saved as new
-    assert.equal(await page.locator('#delete-route').count(), 0, 'no delete without login');
-    await page.fill('#name', 'Test route v2');
-    assert.equal(await page.locator('#save').textContent(), 'Save as new');
+    // ---- not signed in: editing a saved route can only save it as new
+    await page.click('#edit');
+    await page.click('#save');
     assert.equal(await page.locator('#update').count(), 0, 'no update without login');
+    assert.equal(await page.locator('#delete-route').count(), 0, 'no delete without login');
+    assert.match(await page.locator('.sheet .note').innerText(), /saved as a new route/);
+    await page.click('.sheet button:has-text("Cancel")');
+    await page.click('#cancel'); // nothing changed: straight back to viewing
+    await page.waitForSelector('#edit');
 
-    // ---- sends need Google: open the saved route, sign in, come back to it
-    await page.click('#tab-list');
-    await page.waitForSelector('.list li');
-    await page.click('.list li button');
-    assert.match(await page.locator('#sent').textContent(), /Sign in with Google/);
+    // ---- sends need Google: sign in, come back to the same route
+    assert.match(await page.locator('#sent').textContent(), /Sign in/);
     await page.click('#sent');
     await page.waitForSelector('#sent:has-text("Sent it")');
-    assert.equal(await page.inputValue('#name'), 'Test route', 'route restored after sign-in');
+    assert.equal(await page.locator('#route-name').innerText(), 'Test route', 'back on the route');
     await page.click('#sent');
     await page.selectOption('#vote', '7A');
     await page.click('#star-3');
@@ -298,6 +301,7 @@ try {
       [{ route_id: 1, user_id: UID, difficulty: 10, rating: 3 }],
       'ascent logged',
     );
+    assert.match(await page.locator('#sent').textContent(), /voted 7A/);
 
     // ---- list: consensus grade = median(6B, 7A) = 6C; V scale; filters
     db.routes.push({
@@ -310,14 +314,17 @@ try {
       holds: [{ x: 0.4, y: 0.4, r: 0.02, t: 's' }],
       created_at: new Date(Date.now() - 864e5).toISOString(),
     });
-    await page.click('#tab-list');
+    await page.click('#back');
     await page.waitForSelector('.list li');
     const items = page.locator('.list li');
     assert.equal(await items.count(), 2, 'list shows both routes');
-    assert.match(await items.first().innerText(), /Test route 6C ✓/, 'consensus grade + tick');
-    assert.match(await items.first().innerText(), /2 votes, set as 6B · 1 send · ★★★/);
+    const first = await items.first().innerText();
+    assert.match(first, /^6C\s+Test route/, `consensus grade first: ${first}`);
+    assert.match(first, /✓ sent/);
+    assert.match(first, /1 send/);
+    assert.match(first, /2 votes, set as 6B/);
     await page.click('#scale-v');
-    assert.match(await items.first().innerText(), /Test route V5/, 'V scale display');
+    assert.match(await items.first().innerText(), /^V5/, 'V scale display');
     await page.selectOption('#grade-filter', 'V6');
     assert.equal(await items.count(), 1, 'grade filter in V');
     await page.selectOption('#grade-filter', '');
@@ -327,12 +334,14 @@ try {
 
     // ---- signed in: update a route in place (old version backed up), delete another
     await page.locator('.list li button', { hasText: 'Test route' }).click();
-    await page.waitForSelector('svg circle');
+    await page.click('#edit');
     await page.touchscreen.tap(...(await at(0.85, 0.3)));
     await page.click('#role-h');
-    assert.equal(await page.locator('#save').textContent(), 'Save as new');
+    await page.click('#done');
+    await page.click('#save');
     await page.click('#update');
-    await page.waitForSelector('#save:has-text("Saved")');
+    await page.waitForSelector('#edit');
+    assert.match(await toast(), /Route updated/);
     assert.equal(db.routes.find((x) => x.id === 1).holds.length, 4, 'route updated in place');
     assert.equal(db.routes.length, 2, 'update made no new route');
     assert.deepEqual(
@@ -340,9 +349,12 @@ try {
       ['update', 3],
       'old version backed up',
     );
-    await page.click('#tab-list');
+    await page.click('#back');
     await page.locator('.list li button', { hasText: 'Other' }).click();
-    await answer(() => page.click('#delete-route'));
+    await page.click('#edit');
+    await page.click('#save');
+    await page.click('#delete-route');
+    await page.click('#ask-ok'); // in-app confirmation
     await page.waitForSelector('.list li');
     assert.deepEqual(
       db.routes.map((x) => x.name),
@@ -351,14 +363,14 @@ try {
     );
     assert.equal(db.backups.at(-1).action, 'delete', 'deleted route backed up');
 
-    // ---- signed in: new wall photo -> new wall version, existing routes flagged
-    await answer(() =>
-      page.setInputFiles('#photo', {
-        name: 'wall.jpg',
-        mimeType: 'image/jpeg',
-        buffer: Buffer.from(wallJpg),
-      }),
-    );
+    // ---- signed in: new wall photo (account sheet) -> new wall version, routes flagged
+    await page.click('#account');
+    await page.setInputFiles('#photo', {
+      name: 'wall.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from(wallJpg),
+    });
+    await page.click('#ask-ok');
     await page.waitForFunction(() =>
       document.querySelector('.list li')?.innerText.includes('old wall'),
     );
@@ -366,6 +378,7 @@ try {
     assert.equal(db.photos[0].jpeg, true, 'uploaded as a JPEG');
     assert.equal(db.walls.at(-1).version, 3, 'new photo = new wall version');
 
+    await page.click('#account');
     await page.click('#signout');
     await page.waitForSelector('#signin');
   } else console.log('(no backend config in this build: skipped route list checks)');

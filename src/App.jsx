@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Wall from './components/Wall.jsx';
 import RouteList from './components/RouteList.jsx';
 import Ascent from './components/Ascent.jsx';
+import Tape from './components/Tape.jsx';
 import {
   RETURN_KEY,
   currentWall,
@@ -23,6 +24,7 @@ import { shrinkPhoto } from './lib/photo.js';
 
 // Model B (docs/SPEC.md): every route carries its own circles {x, y, r, t}. Nothing reaches the
 // database until Save; until then the route lives in this page and its link.
+// Three screens: the route list, viewing a route, and setting (creating/editing) a route.
 
 function readPref(key, fallback) {
   try {
@@ -66,23 +68,43 @@ const TYPES = [
   ['f', 'Foot only'],
   ['t', 'Top'],
 ];
-const EMPTY = { name: '', difficulty: null, feet: 'm', holds: [] };
+const EMPTY = { id: null, name: '', difficulty: null, feet: 'm', holds: [] };
 
 export default function App() {
   const [wallState, setWallState] = useState({ version: null, photo: 'wall.jpg' });
   const [route, setRoute] = useState(() => decode(startHash()));
-  const [editingId, setEditingId] = useState(null); // saved route this one was changed from
-  // Plain visit (no route link) lands on the shared list; a route link opens that route.
-  const [mode, setMode] = useState(() => (hasBackend && !route.holds.length ? 'list' : 'route'));
+  const [mode, setMode] = useState(() =>
+    route.holds.length ? 'view' : hasBackend ? 'list' : 'set',
+  );
+  const [original, setOriginal] = useState(null); // route as it was before Edit (for Cancel)
+  const [editingId, setEditingId] = useState(null); // saved route being edited
   const [sel, setSel] = useState(null); // index of the selected circle
   const [size, setSize] = useState(() => +readPref('circle', 18)); // 1/1000 of photo width
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', setter: '', problem: '' });
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState('');
   const [user, setUser] = useState(null); // Google account: edit routes, sends, photo
+  const [accountOpen, setAccountOpen] = useState(false);
   const [scale, setScaleState] = useState(() => readPref('scale', 'font')); // font | v
   const [mine, setMine] = useState({}); // my ascents by route id
   const [listKey, setListKey] = useState(0); // bump to reload the route list
+  const [toast, setToast] = useState(null); // { text, kind }
+  const [question, setQuestion] = useState(null); // { text, ok, danger, resolve }
+  const toastTimer = useRef(null);
   const wall = wallState.version;
+
+  const notify = (text, kind = 'ok') => {
+    setToast({ text, kind });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 5000 : 2500);
+  };
+  const ask = (text, ok, danger = false) =>
+    new Promise((resolve) => setQuestion({ text, ok, danger, resolve }));
+  const answer = (yes) => {
+    question.resolve(yes);
+    setQuestion(null);
+  };
   const setScale = (s) => {
     setScaleState(s);
     writePref('scale', s);
@@ -112,37 +134,89 @@ export default function App() {
 
   const showRoute = (r) => {
     setRoute(r);
-    history.replaceState(null, '', '#' + encode(r));
-  };
-  // Any edit makes it unsaved; remember which saved route it came from (signed in: Update it).
-  const editRoute = (r) => {
-    if (route.id != null) setEditingId(route.id);
-    showRoute({ ...r, id: null });
+    history.replaceState(null, '', r.holds.length ? '#' + encode(r) : location.pathname);
   };
   useEffect(() => {
     if (!location.hash && route.holds.length) showRoute(route); // restored after sign-in
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- circles: tap empty photo = new circle (type picker opens), tap circle = select it.
-  // A brand-new route belongs to the current photo; an opened route keeps the photo it was set on.
+  // ---- screens
+  function openRoute(r) {
+    showRoute({
+      id: r.id,
+      wall: r.wall,
+      name: r.name,
+      difficulty: r.difficulty,
+      feet: r.feet,
+      holds: r.holds,
+    });
+    setSel(null);
+    setMode('view');
+  }
+  function newRoute() {
+    setOriginal(null);
+    setEditingId(null);
+    showRoute({ ...EMPTY, wall });
+    setSel(null);
+    setMode('set');
+  }
+  function editRoute() {
+    setOriginal(route);
+    setEditingId(route.id);
+    setSel(null);
+    setMode('set');
+  }
+  const dirty =
+    mode === 'set' &&
+    encode({ ...route, id: null }) !==
+      encode({ ...(original ?? EMPTY), id: null, wall: original?.wall ?? route.wall });
+  async function leaveSet() {
+    if (
+      dirty &&
+      route.holds.length &&
+      !(await ask('Discard your changes to this route?', 'Discard', true))
+    )
+      return;
+    setSel(null);
+    setSaveOpen(false);
+    if (original) {
+      showRoute(original);
+      setMode('view');
+    } else {
+      showRoute({ ...EMPTY, wall });
+      setMode(hasBackend ? 'list' : 'set');
+    }
+  }
+  function backToList() {
+    showRoute({ ...EMPTY, wall });
+    setSel(null);
+    setMode('list');
+  }
+
+  // ---- circles: tap empty photo = new circle (type bar opens), tap circle = select it.
+  // A brand-new route belongs to the current photo; an edited route keeps the photo it was set on.
   const setCircles = (fn) =>
-    editRoute({
+    showRoute({
       ...route,
+      id: null,
       wall: route.holds.length ? route.wall : wall,
       holds: fn(route.holds),
     });
   function onTap(i, p) {
+    if (mode !== 'set') return;
     if (i != null) {
       setSel(i === sel ? null : i);
       if (i !== sel) setSize(Math.round(route.holds[i].r * 1000));
       return;
     }
-    if (sel != null) return setSel(null); // tap on empty wall first just closes the picker
+    if (sel != null) return setSel(null); // tap on empty wall first just closes the type bar
     const c = { x: clamp01(p.x), y: clamp01(p.y), r: size / 1000, t: 'h' };
     setCircles((cs) => [...cs, c]);
     setSel(route.holds.length);
   }
-  const onDrag = (i, x, y) => setCircles((cs) => cs.map((c, j) => (j === i ? { ...c, x, y } : c)));
+  const onDrag = (i, x, y) => {
+    if (mode === 'set') setCircles((cs) => cs.map((c, j) => (j === i ? { ...c, x, y } : c)));
+  };
   const setType = (t) => setCircles((cs) => cs.map((c, j) => (j === sel ? { ...c, t } : c)));
   function resize(v) {
     setSize(v);
@@ -157,36 +231,50 @@ export default function App() {
   // ---- wall photo: signed-in only; a new photo is a new wall version
   async function changePhoto(file) {
     if (!file) return;
+    setAccountOpen(false);
     if (
-      !confirm(
-        'Use this as the new wall photo for everyone? Existing routes will be marked "old wall".',
-      )
+      !(await ask(
+        'Use this photo as the wall for everyone? Existing routes will be marked "old wall".',
+        'Use photo',
+      ))
     )
       return;
-    setBusy('Uploading photo…');
+    setBusy('Uploading the photo…');
     try {
       const url = await uploadPhoto(await shrinkPhoto(file));
       const w = await newWallVersion({ version: (wall ?? 0) + 1, photo_url: url });
       setWallState({ version: w.version, photo: w.photo_url });
       setListKey((k) => k + 1);
+      notify('Wall photo changed');
     } catch (e) {
-      alert(`Could not change the photo: ${e.message}`);
+      notify(`Couldn't change the photo: ${e.message}`, 'error');
     } finally {
       setBusy('');
     }
   }
 
-  async function share(e) {
+  async function share() {
     const url = location.href;
-    if (navigator.share)
-      return navigator.share({ title: route.name || 'Spray wall route', url }).catch(() => {});
-    await navigator.clipboard.writeText(url);
-    const b = e.currentTarget;
-    b.textContent = 'Copied!';
-    setTimeout(() => (b.textContent = 'Share'), 1500);
+    try {
+      if (navigator.share)
+        return await navigator.share({ title: route.name || 'Spray wall route', url });
+      await navigator.clipboard.writeText(url);
+      notify('Link copied');
+    } catch {
+      // share sheet dismissed
+    }
   }
 
-  // ---- routes: anyone creates; signed-in users update or delete (old version backed up)
+  // ---- saving: anyone creates; signed-in users update or delete (old version backed up)
+  function openSave() {
+    if (!route.holds.length)
+      return notify('Tap the holds of your route on the photo first.', 'error');
+    if (!route.holds.some((c) => c.t === 's'))
+      return notify('Mark at least one Start hold.', 'error');
+    setSel(null);
+    setForm({ name: route.name, setter: readPref('setter', ''), problem: '' });
+    setSaveOpen(true);
+  }
   const row = (r) => ({
     wall: r.wall ?? wall,
     name: r.name,
@@ -194,222 +282,163 @@ export default function App() {
     feet: r.feet,
     holds: r.holds,
   });
-  function ready() {
-    if (!route.holds.length) {
-      alert('Tap the holds of your route on the photo first.');
-      return false;
-    }
-    if (!route.holds.some((c) => c.t === 's')) {
-      alert('Mark at least one Start hold.');
-      return false;
-    }
-    return true;
-  }
-  async function save() {
-    if (!ready()) return;
-    let name = route.name.trim();
-    if (!name) name = (prompt('Route name?') ?? '').trim();
-    if (!name) return;
-    const setter = prompt('Your name (shown as setter)', readPref('setter', ''));
-    if (setter === null) return;
-    writePref('setter', setter.trim());
-    const r = { ...route, name: name.slice(0, 60) };
+  async function submit(asNew) {
+    const name = form.name.trim().slice(0, 60);
+    if (!name) return setForm({ ...form, problem: 'Give the route a name.' });
+    const r = { ...route, name };
     setSaving(true);
     try {
-      const saved = await saveRoute({ ...row(r), setter: setter.trim().slice(0, 40) || null });
+      let saved;
+      if (asNew) {
+        writePref('setter', form.setter.trim());
+        saved = await saveRoute({ ...row(r), setter: form.setter.trim().slice(0, 40) || null });
+      } else saved = await updateRouteRow(editingId, row(r));
       showRoute({ ...r, wall: saved.wall, id: saved.id });
+      setSaveOpen(false);
       setEditingId(null);
-      setSel(null);
+      setOriginal(null);
+      setListKey((k) => k + 1);
+      setMode('view');
+      notify(asNew ? 'Route saved' : 'Route updated');
     } catch (e) {
-      alert(`Could not save: ${e.message}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-  async function update() {
-    if (!ready()) return;
-    if (!route.name.trim()) return alert('The route needs a name.');
-    const r = { ...route, name: route.name.trim().slice(0, 60) };
-    setSaving(true);
-    try {
-      const saved = await updateRouteRow(editingId, row(r));
-      showRoute({ ...r, id: saved.id });
-      setEditingId(null);
-      setSel(null);
-    } catch (e) {
-      alert(`Could not update: ${e.message}`);
+      setForm({ ...form, problem: `Couldn't save: ${e.message}` });
     } finally {
       setSaving(false);
     }
   }
   async function remove() {
-    const id = route.id ?? editingId;
-    if (!confirm(`Delete "${route.name || 'this route'}" for everyone? Its sends are deleted too.`))
+    const id = editingId ?? route.id;
+    if (
+      !(await ask(
+        `Delete "${original?.name || route.name}" for everyone? Its sends are deleted too.`,
+        'Delete route',
+        true,
+      ))
+    )
       return;
     try {
       await deleteRoute(id);
-      showRoute({ ...EMPTY, wall });
+      setSaveOpen(false);
       setEditingId(null);
+      setOriginal(null);
       setListKey((k) => k + 1);
-      setMode('list');
+      backToList();
+      notify('Route deleted');
     } catch (e) {
-      alert(`Could not delete: ${e.message}`);
+      notify(`Couldn't delete: ${e.message}`, 'error');
     }
   }
-  function openRoute(r) {
-    showRoute({
-      id: r.id,
-      wall: r.wall,
-      name: r.name,
-      difficulty: r.difficulty,
-      feet: r.feet,
-      holds: r.holds,
-    });
-    setEditingId(null);
-    setSel(null);
-    setMode('route');
-  }
-  function newRoute() {
-    showRoute({ ...EMPTY, wall });
-    setEditingId(null);
-    setSel(null);
-    setMode('route');
-  }
 
-  const isSaved = route.id != null;
-  const canChange = hasBackend && user && (route.id ?? editingId) != null;
   const oldWall = wall && route.wall !== wall && route.holds.length > 0;
-  const account = (
-    <span className="account">
-      {user ? (
-        <>
-          {user.user_metadata?.full_name || user.email}{' '}
-          <label className="file" title="Use a new, straight-on wall photo">
-            {busy || 'Wall photo'}
-            <input
-              id="photo"
-              type="file"
-              accept="image/*"
-              hidden
-              disabled={!!busy}
-              onChange={(e) => changePhoto(e.target.files[0])}
-            />
-          </label>{' '}
-          <button id="signout" onClick={() => signOut()}>
-            Sign out
-          </button>
-        </>
-      ) : (
-        <button id="signin" onClick={() => signIn()}>
-          Sign in with Google
-        </button>
-      )}
-    </span>
-  );
+  const starts = route.holds.filter((c) => c.t === 's').length;
+  const firstName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email;
 
   return (
-    <>
-      <header>
-        <nav className="tabs">
-          <button id="tab-list" aria-pressed={mode === 'list'} onClick={() => setMode('list')}>
-            Routes
+    <div className={`app mode-${mode}`}>
+      {mode === 'list' && (
+        <header className="bar">
+          <h1>Spray wall</h1>
+          {hasBackend &&
+            (user ? (
+              <button id="account" className="ghost" onClick={() => setAccountOpen(true)}>
+                {firstName}
+              </button>
+            ) : (
+              <button id="signin" className="ghost" onClick={() => signIn()}>
+                Sign in
+              </button>
+            ))}
+        </header>
+      )}
+      {mode === 'view' && (
+        <header className="bar">
+          <button id="back" className="icon" aria-label="Back to routes" onClick={backToList}>
+            ←
           </button>
+          <span className="title">
+            <Tape id="route-name" difficulty={route.difficulty}>
+              {route.name || 'Shared route'}
+            </Tape>
+          </span>
+          <span id="route-grade" className="big-grade">
+            {gradeLabel(route.difficulty, scale)}
+          </span>
+        </header>
+      )}
+      {mode === 'set' && (
+        <header className="bar">
           <button
-            id="tab-route"
-            aria-pressed={mode === 'route'}
-            onClick={() => {
-              setMode('route');
-              setSel(null);
-            }}
+            id="cancel"
+            className="icon"
+            aria-label={original ? 'Cancel editing' : 'Back to routes'}
+            onClick={leaveSet}
           >
-            Route
+            ←
           </button>
-        </nav>
-        {mode === 'list' ? (
-          <button id="new-route" onClick={newRoute}>
-            + New route
-          </button>
-        ) : (
-          <>
-            <input
-              id="name"
-              placeholder="Route name"
-              value={route.name}
-              onChange={(e) => editRoute({ ...route, name: e.target.value })}
-            />
-            <select
-              id="grade"
-              value={gradeLabel(route.difficulty, scale)}
-              onChange={(e) =>
-                editRoute({
-                  ...route,
-                  difficulty:
-                    gradeOptions(scale).find((o) => o.label === e.target.value)?.value ?? null,
-                })
-              }
-            >
-              <option value="">Grade</option>
-              {gradeOptions(scale).map((o) => (
-                <option key={o.label}>{o.label}</option>
-              ))}
-            </select>
-            <select
-              id="feet"
-              value={route.feet}
-              onChange={(e) => editRoute({ ...route, feet: e.target.value })}
-            >
-              {Object.entries(FEET).map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            {hasBackend && (
-              <button id="save" onClick={save} disabled={saving || isSaved}>
-                {saving ? 'Saving…' : isSaved ? 'Saved ✓' : editingId ? 'Save as new' : 'Save'}
-              </button>
-            )}
-            {canChange && editingId && !isSaved && (
-              <button id="update" onClick={update} disabled={saving}>
-                Update
-              </button>
-            )}
-            {canChange && (
-              <button id="delete-route" onClick={remove}>
-                Delete
-              </button>
-            )}
-            <button id="share" onClick={share}>
-              Share
+          <span className="title plain">{original ? 'Edit route' : 'New route'}</span>
+          {hasBackend && (
+            <button id="save" className="primary" onClick={openSave}>
+              Save
             </button>
-            <span className="legend">
-              {TYPES.map(([t, label]) => (
-                <span key={t}>
-                  <i className={t} />
-                  {label}
-                </span>
-              ))}
-            </span>
+          )}
+        </header>
+      )}
+
+      <main>
+        {mode === 'list' &&
+          (hasBackend ? (
+            <RouteList
+              key={listKey}
+              wall={wall}
+              scale={scale}
+              setScale={setScale}
+              mine={mine}
+              onOpen={openRoute}
+              onNew={newRoute}
+            />
+          ) : (
+            <p className="empty">The shared route list isn't connected.</p>
+          ))}
+
+        {mode !== 'list' && (
+          <>
+            {mode === 'view' && (
+              <p className="meta route-meta">
+                <span>{FEET[route.feet]}</span>
+                <span>{route.holds.length} holds</span>
+                {oldWall && (
+                  <span className="old">Set on an older wall photo: holds may have moved</span>
+                )}
+              </p>
+            )}
+            {mode === 'set' && (
+              <p className="hint">
+                {route.holds.length
+                  ? `${route.holds.length} holds${starts ? '' : ', no Start yet'}. Tap a circle to change it, drag the selected one to move it.`
+                  : 'Tap each hold of your route on the photo. Pinch or use − + to zoom.'}
+              </p>
+            )}
+            <Wall
+              src={wallState.photo}
+              circles={route.holds}
+              sel={mode === 'set' ? sel : null}
+              onTap={onTap}
+              onDrag={onDrag}
+            />
           </>
         )}
-      </header>
-      {mode === 'list' ? (
-        hasBackend ? (
-          <RouteList
-            key={listKey}
-            wall={wall}
-            scale={scale}
-            setScale={setScale}
-            mine={mine}
-            onOpen={openRoute}
-            account={account}
-          />
-        ) : (
-          <p className="msg">The shared route list is not connected yet.</p>
-        )
-      ) : (
-        <>
-          {hasBackend && isSaved && (
+      </main>
+
+      {mode === 'list' && hasBackend && (
+        <footer className="dock">
+          <button id="new-route" className="primary grow" onClick={newRoute}>
+            Set a new route
+          </button>
+        </footer>
+      )}
+      {mode === 'view' && (
+        <footer className="dock">
+          {hasBackend && route.id != null && (
             <Ascent
               key={route.id}
               routeId={route.id}
@@ -417,47 +446,36 @@ export default function App() {
               mine={mine[route.id]}
               scale={scale}
               onChange={onAscent}
+              notify={notify}
             />
           )}
-          <p className="hint">
-            {editingId && hasBackend && !user
-              ? 'You changed a saved route: Save as new, or sign in (Routes tab) to update the original.'
-              : route.holds.length
-                ? 'Tap a hold to add it, tap a circle to change its type or size, drag the selected circle to move it.'
-                : 'Tap each hold of your route on the photo. Pinch or +/− to zoom.'}
-          </p>
-          {oldWall && (
-            <p className="warn">
-              This route was set on an older wall photo, so its holds may not match the wall.
-            </p>
-          )}
-          <Wall
-            src={wallState.photo}
-            circles={route.holds}
-            sel={sel}
-            onTap={onTap}
-            onDrag={onDrag}
-          />
-          {sel != null && route.holds[sel] && (
-            <div className="picker">
-              <div className="types">
+          <button id="share" onClick={share}>
+            Share
+          </button>
+          <button id="edit" onClick={editRoute}>
+            Edit
+          </button>
+        </footer>
+      )}
+      {mode === 'set' && (
+        <footer className="dock column">
+          {sel != null && route.holds[sel] ? (
+            <>
+              <div className="types" role="group" aria-label="Hold type">
                 {TYPES.map(([t, label]) => (
                   <button
                     key={t}
                     id={`role-${t}`}
-                    className={t}
+                    className={`type ${t}`}
                     aria-pressed={route.holds[sel].t === t}
                     onClick={() => setType(t)}
                   >
                     {label}
                   </button>
                 ))}
-                <button id="role-off" onClick={removeCircle}>
-                  Remove
-                </button>
               </div>
-              <label className="sizer">
-                size
+              <div className="sizer">
+                <label htmlFor="size">Size</label>
                 <input
                   id="size"
                   type="range"
@@ -466,14 +484,198 @@ export default function App() {
                   value={size}
                   onChange={(e) => resize(+e.target.value)}
                 />
-                <button id="done" onClick={() => setSel(null)}>
+                <button id="role-off" className="danger" onClick={removeCircle}>
+                  Remove
+                </button>
+                <button id="done" className="primary" onClick={() => setSel(null)}>
                   Done
                 </button>
-              </label>
+              </div>
+            </>
+          ) : (
+            <div className="legend" aria-label="Hold types">
+              {TYPES.map(([t, label]) => (
+                <span key={t}>
+                  <i className={t} />
+                  {label}
+                </span>
+              ))}
             </div>
           )}
-        </>
+        </footer>
       )}
-    </>
+
+      {saveOpen && (
+        <div className="scrim" onClick={(e) => e.target === e.currentTarget && setSaveOpen(false)}>
+          <form
+            className="sheet"
+            aria-label="Save route"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit(!(editingId && user));
+            }}
+          >
+            <h2>{editingId ? 'Save your changes' : 'Save route'}</h2>
+            <label className="field">
+              Name
+              <input
+                id="name"
+                autoFocus
+                maxLength={60}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value, problem: '' })}
+              />
+            </label>
+            <div className="row">
+              <label className="field">
+                Grade
+                <select
+                  id="grade"
+                  value={gradeLabel(route.difficulty, scale)}
+                  onChange={(e) =>
+                    showRoute({
+                      ...route,
+                      id: null,
+                      difficulty:
+                        gradeOptions(scale).find((o) => o.label === e.target.value)?.value ?? null,
+                    })
+                  }
+                >
+                  <option value="">Not sure</option>
+                  {gradeOptions(scale).map((o) => (
+                    <option key={o.label}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                Feet
+                <select
+                  id="feet"
+                  value={route.feet}
+                  onChange={(e) => showRoute({ ...route, id: null, feet: e.target.value })}
+                >
+                  {Object.entries(FEET).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {!(editingId && user) && (
+              <label className="field">
+                Your name (shown as setter)
+                <input
+                  id="setter"
+                  maxLength={40}
+                  value={form.setter}
+                  onChange={(e) => setForm({ ...form, setter: e.target.value })}
+                />
+              </label>
+            )}
+            {editingId && !user && (
+              <p className="note">
+                Editing someone's route? It's saved as a new route. Sign in to change the original.
+              </p>
+            )}
+            {form.problem && (
+              <p className="problem" role="alert">
+                {form.problem}
+              </p>
+            )}
+            <div className="actions">
+              {editingId && user ? (
+                <>
+                  <button id="update" type="submit" className="primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Update route'}
+                  </button>
+                  <button
+                    id="save-new"
+                    type="button"
+                    disabled={saving}
+                    onClick={() => submit(true)}
+                  >
+                    Save as new
+                  </button>
+                  <button id="delete-route" type="button" className="danger" onClick={remove}>
+                    Delete route
+                  </button>
+                </>
+              ) : (
+                <button id="save-new" type="submit" className="primary" disabled={saving}>
+                  {saving ? 'Saving…' : 'Save route'}
+                </button>
+              )}
+              <button type="button" onClick={() => setSaveOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {accountOpen && (
+        <div
+          className="scrim"
+          onClick={(e) => e.target === e.currentTarget && setAccountOpen(false)}
+        >
+          <div className="sheet" role="dialog" aria-label="Account">
+            <h2>{user?.user_metadata?.full_name || user?.email}</h2>
+            <p className="note">
+              Signed in: you can log sends, edit or delete routes, and change the wall photo.
+            </p>
+            <div className="actions">
+              <label className="button" htmlFor="photo">
+                {busy || 'Change wall photo'}
+              </label>
+              <input
+                id="photo"
+                type="file"
+                accept="image/*"
+                hidden
+                disabled={!!busy}
+                onChange={(e) => changePhoto(e.target.files[0])}
+              />
+              <button
+                id="signout"
+                onClick={() => {
+                  setAccountOpen(false);
+                  signOut();
+                }}
+              >
+                Sign out
+              </button>
+              <button onClick={() => setAccountOpen(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {question && (
+        <div className="scrim">
+          <div className="sheet" role="alertdialog" aria-label="Confirm">
+            <p>{question.text}</p>
+            <div className="actions">
+              <button
+                id="ask-ok"
+                autoFocus
+                className={question.danger ? 'danger' : 'primary'}
+                onClick={() => answer(true)}
+              >
+                {question.ok}
+              </button>
+              <button id="ask-cancel" onClick={() => answer(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className={`toast ${toast?.kind ?? ''}`} role="status" aria-live="polite">
+        {toast?.text}
+      </div>
+      {busy && !accountOpen && <div className="toast">{busy}</div>}
+    </div>
   );
 }

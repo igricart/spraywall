@@ -98,7 +98,7 @@ export default function Wall({ src, circles, sel, onTap, onDrag }) {
   }, []);
 
   // Fit the whole wall on screen on desktop; full width on phones.
-  const fit = size ? { maxWidth: `calc((100dvh - 9rem) * ${size.w / size.h})` } : undefined;
+  const fit = size ? { maxWidth: `calc((100dvh - 13rem) * ${size.w / size.h})` } : undefined;
 
   return (
     <div className="view" ref={viewRef} style={fit}>
